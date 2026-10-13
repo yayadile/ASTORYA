@@ -1,0 +1,21 @@
+# Fork lokal dari ar_flutter_plugin_plus (dipakai sebagai dependency path).
+# Folder example/ dan test/ sengaja dikecualikan dari analisis: contoh tersebut
+# bergantung pada firebase/geoflutterfire yang tidak dipakai aplikasi ASTORYA.
+analyzer:
+  exclude:
+    - example/**
+    - test/**
+  errors:
+    deprecated_member_use: ignore
+    unnecessary_this: ignore
+    prefer_const_constructors_in_immutables: ignore
+    use_super_parameters: ignore
+    avoid_print: ignore
+    library_private_types_in_public_api: ignore
+    no_logic_in_create_state: ignore
+    strict_top_level_inference: ignore
+    unnecessary_null_in_if_null_operators: ignore
+
+linter:
+  rules:
+    avoid_print: false
