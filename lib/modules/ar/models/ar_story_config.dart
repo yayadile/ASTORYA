@@ -34,6 +34,8 @@ class ArStoryConfig {
     this.bgmUrl,
     this.subtitles = const <SubtitleCue>[],
     this.modelPath,
+    this.modelVideoPath,
+    this.modelVideoRotation = 0,
     this.overlayImagePath,
     this.modelScale = 1.0,
     this.modelLift = 0.0,
@@ -103,7 +105,29 @@ class ArStoryConfig {
   ///
   /// Biarkan `null` untuk memakai [overlayImagePath], atau keduanya `null`
   /// bila tidak ingin menampilkan visual di atas marker.
+  ///
+  /// **Pengecualian**: bila [modelVideoPath] diisi, node model TIDAK
+  /// ditambahkan ke scene (native merender video langsung sebagai quad GL
+  /// yang nempel marker per-frame). `modelPath` tetap wajib diisi sebagai
+  /// penanda plane (`meshplane.glb`) agar WebAR memakai file yang sama.
   final String? modelPath;
+
+  /// Path asset / URL video (`.mp4`) yang ditempel pada plane model di atas
+  /// marker — mode native "video model" (tracking 3D beneran).
+  ///
+  /// Syarat: [modelPath] wajib diisi (`meshplane.glb`). Bila diisi, overlay
+  /// widget video ([videoPath]/[hasVideo]) HARUS kosong agar tidak tampil
+  /// ganda — video hanya dirender native sebagai quad GL per-frame.
+  ///
+  /// WebAR memakai field yang sama sebagai tekstur `meshplane.glb`.
+  final String? modelVideoPath;
+
+  /// Rotasi video model searah jarum jam dalam derajat: 0, 90, 180, 270.
+  ///
+  /// Samakan dengan orientasi cetak marker: bila video tampak miring/
+  /// kebalik di atas kertas, naikkan ke 90/180/270 sampai tegak. Tidak
+  /// berpengaruh ke audio/subtitle.
+  final int modelVideoRotation;
 
   /// Path asset gambar 2D (.png) yang dirender di atas marker,
   /// dipakai bila [modelPath] tidak diisi.
@@ -208,6 +232,14 @@ class ArStoryConfig {
     return v != null && v.isNotEmpty;
   }
 
+  /// true bila mode "video model" aktif: video ditempel pada plane model
+  /// (`meshplane.glb`) — native via quad GL per-frame, WebAR via tekstur.
+  /// BUKAN overlay widget, jadi tidak memakai [videoPath]/[hasVideo].
+  bool get hasModelVideo {
+    final v = modelVideoPath?.trim();
+    return v != null && v.isNotEmpty;
+  }
+
   /// true bila voiceover diisi (tidak null / tidak kosong).
   bool get hasVoiceover {
     final v = voiceoverUrl?.trim();
@@ -245,6 +277,18 @@ class ArStoryConfig {
   String? validate() {
     if (markerImagePath.trim().isEmpty) {
       return 'markerImagePath tidak boleh kosong';
+    }
+    if (hasModelVideo && (modelPath?.trim().isEmpty ?? true)) {
+      return 'modelVideoPath membutuhkan modelPath (meshplane.glb)';
+    }
+    if (hasModelVideo && hasVideo) {
+      return 'modelVideoPath dan videoPath tidak boleh diisi bersamaan';
+    }
+    if (modelVideoRotation != 0 &&
+        modelVideoRotation != 90 &&
+        modelVideoRotation != 180 &&
+        modelVideoRotation != 270) {
+      return 'modelVideoRotation harus 0/90/180/270';
     }
     for (final cue in subtitles) {
       if (cue.end <= cue.start) {

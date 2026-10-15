@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -15,6 +16,7 @@ import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.util.Log
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.TextureView
 import android.view.PixelCopy
 import android.view.View
@@ -135,6 +137,26 @@ internal class AndroidARView(
     /// Penanda: payload sudut marker sudah pernah terkirim (untuk mengirim
     /// satu kali event "marker hilang" saat tracking berhenti).
     private var lastCornersSent = false
+
+    /// Alasan terakhir [computeMarkerScreenCorners] mengembalikan null.
+    /// Hanya untuk log diagnostik saat marker hilang dari pandangan.
+    private var lastCornerNullReason: String = ""
+
+    // --- Video-on-marker (MediaPlayer -> GL quad menempel marker) ------------
+    // Dipakai mode native "video model": meshplane.glb memang sebuah plane,
+    // jadi videonya digambar sebagai textured quad yang diposisikan per-frame
+    // dari sudut layar ARCore (tracking beneran), bukan overlay widget.
+    private val markerVideoRenderer = VideoPlaneRenderer()
+    private var markerVideoPlayer: MediaPlayer? = null
+    private var markerVideoSurface: Surface? = null
+    private var markerVideoPrepared = false
+    private var markerVideoWantedPlaying = false
+    // Pernah start() sukses. Gerbang penting: pause()/stop() SEBELUM pernah
+    // start adalah state ilegal bagi MediaPlayer dan melempar error (-38)
+    // yang mematikan player (inilah "gagal diputar (what=-38)").
+    private var markerVideoStarted = false
+    private var markerVideoRotation = 0
+    private var pendingMarkerVideo: PendingMarkerVideo? = null
 
     private val nonTrackingResetThreshold = 30
     private val modelIoExecutor = Executors.newFixedThreadPool(2)
@@ -322,6 +344,38 @@ internal class AndroidARView(
                                 modelRenderer.removeModel(nodeName)
                                 result.success(null)
                             }
+                        }
+                        "setupMarkerVideo" -> {
+                            val videoPath = call.argument<String>("videoPath")
+                            if (videoPath.isNullOrEmpty()) {
+                                result.error("ARG", "videoPath kosong", null)
+                            } else {
+                                val kind = call.argument<String>("kind") ?: "asset"
+                                val loop = call.argument<Boolean>("loop") ?: true
+                                val muted = call.argument<Boolean>("muted") ?: true
+                                val autoplay =
+                                    call.argument<Boolean>("autoplay") ?: false
+                                val rotation =
+                                    (call.argument<Number>("rotation")?.toInt())
+                                        ?: 0
+                                markerVideoRotation = rotation
+                                setupMarkerVideo(
+                                    videoPath, kind, loop, muted, autoplay)
+                                result.success(true)
+                            }
+                        }
+                        "setMarkerVideoPlaying" -> {
+                            val playing =
+                                call.argument<Boolean>("playing") ?: false
+                            setMarkerVideoPlaying(playing)
+                            result.success(null)
+                        }
+                        "seekMarkerVideo" -> {
+                            val ms =
+                                (call.argument<Number>("positionMs")?.toLong())
+                                    ?: 0L
+                            seekMarkerVideo(ms)
+                            result.success(null)
                         }
                         "transformationChanged" -> {
                             val nodeName: String? = call.argument<String>("name")
@@ -523,6 +577,13 @@ internal class AndroidARView(
 
     fun onResume() {
         glSurfaceView.onResume()
+        // Lanjutkan video marker bila sebelum pause sedang diinginkan main.
+        if (markerVideoWantedPlaying && markerVideoPrepared) {
+            try {
+                markerVideoPlayer?.start()
+            } catch (_: Exception) {
+            }
+        }
         if (!renderer.isSurfaceCreated) {
             pendingSessionResume = true
             return
@@ -540,6 +601,14 @@ internal class AndroidARView(
             showAnimatedGuide = false
         }
         glSurfaceView.onPause()
+        // Jeda video marker (flag wanted tetap, dilanjutkan di onResume).
+        // Hanya bila pernah start: pause() sebelumnya = state ilegal (-38).
+        if (markerVideoStarted) {
+            try {
+                markerVideoPlayer?.pause()
+            } catch (_: Exception) {
+            }
+        }
         activeAugmentedImages.clear()
         lastAugmentedImageUpdateMs.clear()
         activeTrackedImage = null
@@ -562,6 +631,11 @@ internal class AndroidARView(
             worldOriginAnchor?.detach()
             worldOriginAnchor = null
             modelRenderer.destroy()
+            releaseMarkerVideoPlayer()
+            try {
+                glSurfaceView.queueEvent { markerVideoRenderer.release() }
+            } catch (_: Exception) {
+            }
             session?.close()
             session = null
 
@@ -1318,32 +1392,53 @@ internal class AndroidARView(
         
         val now = SystemClock.uptimeMillis()
         for (augmentedImage in updatedAugmentedImages) {
+            Log.i(TAG, "AugmentedImage detected: name=${augmentedImage.name}, state=${augmentedImage.trackingState}, method=${augmentedImage.trackingMethod}")
             when (augmentedImage.trackingState) {
                 TrackingState.TRACKING -> {
-                    if (augmentedImage.trackingMethod == AugmentedImage.TrackingMethod.FULL_TRACKING) {
-                        val imageName = augmentedImage.name ?: "unknown"
-                        val centerPose = augmentedImage.centerPose
-                        val transformation = serializePose(centerPose)
-                        // Dipakai render loop untuk proyeksi 4 sudut layar video.
-                        activeTrackedImage = augmentedImage
-                        val shouldEmit = if (continuousImageTracking) {
-                            val lastUpdate = lastAugmentedImageUpdateMs[imageName] ?: 0L
-                            now - lastUpdate >= imageTrackingUpdateIntervalMs
-                        } else {
-                            !activeAugmentedImages.contains(imageName)
+                    // Hanya FULL_TRACKING yang dipercaya. Terbukti via log:
+                    // saat LAST_KNOWN_POSE, centerPose degenerat menempel
+                    // kamera (imgT == camT persis) sehingga me-render quad
+                    // raksasa melayang + node nyasar. LAST_KNOWN diperlakukan
+                    // hilang: bersihkan state agar deteksi berikutnya segar.
+                    if (augmentedImage.trackingMethod !=
+                        AugmentedImage.TrackingMethod.FULL_TRACKING) {
+                        if (activeTrackedImage?.name == augmentedImage.name) {
+                            activeTrackedImage = null
                         }
-
-                        if (shouldEmit) {
-                            emitImageDetection(imageName, transformation)
-                            if (continuousImageTracking) {
-                                lastAugmentedImageUpdateMs[imageName] = now
-                            }
+                        augmentedImage.name?.let { name ->
+                            activeAugmentedImages.remove(name)
+                            lastAugmentedImageUpdateMs.remove(name)
                         }
+                        continue
+                    }
+                    // FULL_TRACKING: pose valid (Y lokal = normal marker,
+                    // terverifikasi empiris via log).
+                    val imageName = augmentedImage.name ?: "unknown"
+                    val centerPose = augmentedImage.centerPose
+                    val transformation = serializePose(centerPose)
+                    // Dipakai render loop untuk proyeksi 4 sudut layar video.
+                    activeTrackedImage = augmentedImage
+                    val shouldEmit = if (continuousImageTracking) {
+                        val lastUpdate = lastAugmentedImageUpdateMs[imageName] ?: 0L
+                        now - lastUpdate >= imageTrackingUpdateIntervalMs
+                    } else {
+                        !activeAugmentedImages.contains(imageName)
+                    }
 
-                        activeAugmentedImages.add(imageName)
+                    if (shouldEmit) {
+                        emitImageDetection(imageName, transformation)
+                        if (continuousImageTracking) {
+                            lastAugmentedImageUpdateMs[imageName] = now
+                        }
+                    }
+
+                    activeAugmentedImages.add(imageName)
+                }
+                TrackingState.PAUSED -> {
+                    if (activeTrackedImage?.name == augmentedImage.name) {
+                        activeTrackedImage = null
                     }
                 }
-                TrackingState.PAUSED -> Unit
                 TrackingState.STOPPED -> {
                     augmentedImage.name?.let { name ->
                         activeAugmentedImages.remove(name)
@@ -1379,25 +1474,65 @@ internal class AndroidARView(
     /// urutan: top-left, top-right, bottom-right, bottom-left (saat marker
     /// menghadap kamera lurus). Return null bila kamera/viewport belum siap.
     private fun computeMarkerScreenCorners(): DoubleArray? {
-        val image = activeTrackedImage ?: return null
-        val frame = currentFrame ?: return null
+        val image = activeTrackedImage
+        if (image == null || image.trackingState != TrackingState.TRACKING) {
+            lastCornerNullReason = "image=${image?.trackingState ?: "null"}"
+            return null
+        }
+        // Sabuk ganda: hanya FULL_TRACKING (LAST_KNOWN_POSE = pose degenerat).
+        if (image.trackingMethod !=
+            AugmentedImage.TrackingMethod.FULL_TRACKING) {
+            lastCornerNullReason = "method=${image.trackingMethod}"
+            return null
+        }
+        val frame = currentFrame
+        if (frame == null) {
+            lastCornerNullReason = "frame=null"
+            return null
+        }
         val camera = frame.camera
-        if (camera.trackingState != TrackingState.TRACKING) return null
+        if (camera.trackingState != TrackingState.TRACKING) {
+            lastCornerNullReason =
+                "camera=${camera.trackingState}/${camera.trackingFailureReason}"
+            return null
+        }
 
-        val vpW = cornersViewportWidth
-        val vpH = cornersViewportHeight
-        if (vpW <= 0 || vpH <= 0) return null
+        var vpW = cornersViewportWidth
+        var vpH = cornersViewportHeight
+        if (vpW <= 0 || vpH <= 0) {
+            // Fallback: pakai ukuran GLSurfaceView bila ukuran surface khusus
+            // sudut belum terisi (mencegah video selalu jatuh ke mode datar).
+            // (viewportWidth/Height milik inner renderer, tak terlihat dari sini.)
+            vpW = glSurfaceView.width
+            vpH = glSurfaceView.height
+        }
+        if (vpW <= 0 || vpH <= 0) {
+            lastCornerNullReason = "viewport=${cornersViewportWidth}x${cornersViewportHeight}/view=${glSurfaceView.width}x${glSurfaceView.height}"
+            return null
+        }
+        lastCornerNullReason = ""
 
         val pose = image.centerPose
+        // ARCore AugmentedImage coordinate system (TERVERIFIKASI empiris via
+        // log saat FULL_TRACKING: sumbu lokal Y = (0,1,0) dunia = normal
+        // keluar marker):
+        // +X: horizontal right across the face of the image
+        // +Y: normal vector pointing straight OUT of the image plane (towards camera)
+        // -Z: top of the image, +Z: bottom of the image
+        // extentX: physical width, extentZ: physical height
         val halfW = image.extentX / 2.0f
-        val halfH = image.extentY / 2.0f
+        val halfH = image.extentZ / 2.0f
 
-        // Sudut lokal marker: top-left, top-right, bottom-right, bottom-left.
+        // 4 corners on the marker surface plane (Y = 0):
+        // 0: top-left     (-halfW, 0f, -halfH)
+        // 1: top-right    ( halfW, 0f, -halfH)
+        // 2: bottom-right ( halfW, 0f,  halfH)
+        // 3: bottom-left  (-halfW, 0f,  halfH)
         val localCorners = floatArrayOf(
-            -halfW, halfH, 0f,
-            halfW, halfH, 0f,
-            halfW, -halfH, 0f,
-            -halfW, -halfH, 0f,
+            -halfW, 0f, -halfH,
+            halfW, 0f, -halfH,
+            halfW, 0f, halfH,
+            -halfW, 0f, halfH,
         )
 
         val viewMatrix = FloatArray(16)
@@ -1412,12 +1547,8 @@ internal class AndroidARView(
         val clipVec = FloatArray(4)
 
         for (i in 0 until 4) {
-            pose.transformPoint(
-                world,
-                localCorners[i * 3],
-                localCorners[i * 3 + 1],
-                localCorners[i * 3 + 2],
-            )
+            // ARCore 1.52 overload transformPoint(out, outOffset, point, pointOffset)
+            pose.transformPoint(world, 0, localCorners, i * 3)
             worldVec[0] = world[0]
             worldVec[1] = world[1]
             worldVec[2] = world[2]
@@ -1427,7 +1558,7 @@ internal class AndroidARView(
             android.opengl.Matrix.multiplyMV(clipVec, 0, projectionMatrix, 0, viewVec, 0)
 
             val w = clipVec[3]
-            if (w == 0.0f) return null
+            if (w <= 0.001f) return null
             val ndcX = clipVec[0] / w
             val ndcY = clipVec[1] / w
 
@@ -1447,6 +1578,16 @@ internal class AndroidARView(
         if (corners == null) {
             if (lastCornersSent) {
                 lastCornersSent = false
+                // Diagnostik: catat KENAPA marker dianggap hilang. Ini satu-satunya
+                // jalur yang membuat video disembunyikan oleh Flutter.
+                Log.w(
+                    TAG,
+                    "marker LOST: reason=$lastCornerNullReason " +
+                        "imgState=${activeTrackedImage?.trackingState} " +
+                        "method=${activeTrackedImage?.trackingMethod} " +
+                        "cont=$continuousImageTracking " +
+                        "activeSet=$activeAugmentedImages"
+                )
                 activity.runOnUiThread {
                     sessionManagerChannel.invokeMethod(
                         "onMarkerCorners",
@@ -1461,11 +1602,196 @@ internal class AndroidARView(
         arguments["screenCorners"] = corners
         arguments["viewportWidth"] = cornersViewportWidth
         arguments["viewportHeight"] = cornersViewportHeight
+        // Kunci payload tetap "extentX"/"extentY" sesuai kontrak di
+        // ARMarkerCorners (Dart). Nilai "extentY" = tinggi marker = extentZ ARCore.
         arguments["extentX"] = activeTrackedImage?.extentX?.toDouble() ?: 0.2
-        arguments["extentY"] = activeTrackedImage?.extentY?.toDouble() ?: 0.2
+        arguments["extentY"] = activeTrackedImage?.extentZ?.toDouble() ?: 0.2
         activity.runOnUiThread {
             sessionManagerChannel.invokeMethod("onMarkerCorners", arguments)
         }
+    }
+
+    // ------------------------------------------------------- marker video ---
+    // WAJIB dipanggil di UI thread (MediaPlayer butuh Looper untuk callback).
+    // Semua pemanggil (method channel, lifecycle) sudah di UI thread kecuali
+    // [onMarkerVideoSurfaceReady] yang mem-post ke UI thread lebih dulu.
+
+    private fun setupMarkerVideo(
+        videoPath: String,
+        kind: String,
+        loop: Boolean,
+        muted: Boolean,
+        autoplay: Boolean,
+    ) {
+        releaseMarkerVideoPlayer()
+        markerVideoWantedPlaying = autoplay
+        val surfaceTexture = markerVideoRenderer.surfaceTexture
+        if (surfaceTexture == null) {
+            // Surface GL belum ada (belum onSurfaceCreated): tunda sampai siap.
+            pendingMarkerVideo =
+                PendingMarkerVideo(videoPath, kind, loop, muted, autoplay)
+            return
+        }
+        try {
+            val player = MediaPlayer()
+            when (kind) {
+                "url" -> player.setDataSource(videoPath)
+                "file" -> {
+                    val p = if (videoPath.startsWith("file://")) {
+                        android.net.Uri.parse(videoPath).path ?: videoPath
+                    } else {
+                        videoPath
+                    }
+                    player.setDataSource(p)
+                }
+                else -> setAssetDataSource(player, videoPath)
+            }
+            player.isLooping = loop
+            val vol = if (muted) 0f else 1f
+            player.setVolume(vol, vol)
+            val surface = Surface(surfaceTexture)
+            markerVideoSurface?.release()
+            markerVideoSurface = surface
+            player.setSurface(surface)
+            player.setOnPreparedListener { mp ->
+                markerVideoPrepared = true
+                try {
+                    val w = mp.videoWidth
+                    val h = mp.videoHeight
+                    if (w > 0 && h > 0) {
+                        surfaceTexture.setDefaultBufferSize(w, h)
+                    }
+                } catch (_: Exception) {
+                }
+                if (markerVideoWantedPlaying) {
+                    try {
+                        mp.start()
+                        markerVideoStarted = true
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+            player.setOnErrorListener { _, what, extra ->
+                Log.e(TAG, "MarkerVideo error what=$what extra=$extra")
+                try {
+                    sessionManagerChannel.invokeMethod(
+                        "onError",
+                        listOf("Video marker gagal diputar " +
+                            "(what=$what extra=$extra)."))
+                } catch (_: Exception) {
+                    // View sudah dispose - banner tak dibutuhkan.
+                }
+                releaseMarkerVideoPlayer()
+                true
+            }
+            markerVideoPlayer = player
+            player.prepareAsync()
+        } catch (e: Exception) {
+            Log.e(TAG, "setupMarkerVideo: ${e.message}")
+            sessionManagerChannel.invokeMethod(
+                "onError",
+                listOf("Video marker gagal dimuat: ${e.message}"))
+            releaseMarkerVideoPlayer()
+        }
+    }
+
+    private fun setAssetDataSource(player: MediaPlayer, assetPath: String) {
+        val loader = FlutterInjector.instance().flutterLoader()
+        val key = loader.getLookupKeyForAsset(assetPath)
+        try {
+            viewContext.assets.openFd(key).use { fd ->
+                player.setDataSource(
+                    fd.fileDescriptor, fd.startOffset, fd.length)
+            }
+        } catch (e: Exception) {
+            // Aset terkompresi tidak mendukung openFd: salin ke cache dulu.
+            Log.w(TAG, "openFd gagal ($key), fallback salin ke cache")
+            val ext = assetPath.substringAfterLast('.', "")
+            val out = File(viewContext.cacheDir,
+                "marker_video" + if (ext.isNotEmpty()) ".$ext" else ".mp4")
+            viewContext.assets.open(key).use { input ->
+                out.outputStream().use { output -> input.copyTo(output) }
+            }
+            player.setDataSource(out.absolutePath)
+        }
+    }
+
+    private fun setMarkerVideoPlaying(playing: Boolean) {
+        markerVideoWantedPlaying = playing
+        val player = markerVideoPlayer
+        if (player == null || !markerVideoPrepared) return
+        try {
+            if (playing) {
+                player.start()
+                markerVideoStarted = true
+            } else if (markerVideoStarted) {
+                // pause() sebelum pernah start() = state ilegal (-38).
+                player.pause()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "setMarkerVideoPlaying: ${e.message}")
+        }
+    }
+
+    private fun seekMarkerVideo(positionMs: Long) {
+        val player = markerVideoPlayer
+        if (player == null || !markerVideoPrepared) return
+        try {
+            player.seekTo(positionMs.toInt())
+        } catch (e: Exception) {
+            Log.e(TAG, "seekMarkerVideo: ${e.message}")
+        }
+    }
+
+    /// Dipanggil dari `onSurfaceCreated` (GL thread) setelah renderer siap.
+    private fun onMarkerVideoSurfaceReady() {
+        val pending = pendingMarkerVideo ?: return
+        pendingMarkerVideo = null
+        activity.runOnUiThread {
+            setupMarkerVideo(pending.videoPath, pending.kind,
+                pending.loop, pending.muted, pending.autoplay)
+        }
+    }
+
+    /// Gambar quad video di atas marker. Dipanggil tiap frame render
+    /// (GL thread) dari `onDrawFrame`. Batal bila belum prepared / marker
+    /// tidak terlihat (video disembunyikan, benar secara AR).
+    private var dbgCornerLogs = 0
+
+    private fun drawMarkerVideo() {
+        if (!markerVideoPrepared || markerVideoPlayer == null) return
+        val corners = computeMarkerScreenCorners()
+        if (corners == null) {
+            if (dbgCornerLogs < 3) {
+                dbgCornerLogs++
+                Log.i(TAG, "DBG_CORNERS null reason=$lastCornerNullReason")
+            }
+            return
+        }
+        if (dbgCornerLogs < 3) {
+            dbgCornerLogs++
+            Log.i(TAG, "DBG_CORNERS " +
+                corners.joinToString(",") { "%.3f".format(it) })
+        }
+        markerVideoRenderer.draw(corners, markerVideoRotation)
+    }
+
+    private fun releaseMarkerVideoPlayer() {
+        markerVideoPrepared = false
+        markerVideoStarted = false
+        // Sengaja TANPA stop(): stop() di state yang salah (idle/preparing/
+        // error) juga memicu error (-38). release() legal di semua state dan
+        // sudah menghentikan output audio/video.
+        try {
+            markerVideoPlayer?.release()
+        } catch (_: Exception) {
+        }
+        markerVideoPlayer = null
+        try {
+            markerVideoSurface?.release()
+        } catch (_: Exception) {
+        }
+        markerVideoSurface = null
     }
 
     private fun applyImageTrackingSettings(
@@ -1494,6 +1820,7 @@ internal class AndroidARView(
             try {
                 val loader = FlutterInjector.instance().flutterLoader()
                 val key = loader.getLookupKeyForAsset(imagePath)
+                Log.i(TAG, "Attempting to load asset with key: $key for path: $imagePath")
 
                 val inputStream = viewContext.assets.open(key)
                 val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
@@ -1501,8 +1828,18 @@ internal class AndroidARView(
 
                 if (bitmap != null) {
                     val imageName = imagePath.substringAfterLast("/").substringBeforeLast(".")
-                    val physicalWidth = 0.2f // 20cm - adjust based on your actual printed image size
+                    val aspect = bitmap.width.toFloat() / bitmap.height.toFloat()
+                    // If image is A4 landscape (842x595 ~ 1.414), standard physical width is 0.297m (29.7cm).
+                    // If image is A4 portrait (595x842 ~ 0.707), standard physical width is 0.210m (21.0cm).
+                    // Default fallback: 0.24m.
+                    val physicalWidth = when {
+                        aspect in 1.30f..1.55f -> 0.297f
+                        aspect in 0.65f..0.75f -> 0.210f
+                        else -> 0.24f
+                    }
+                    Log.i(TAG, "Decoded bitmap for $imageName: ${bitmap.width}x${bitmap.height}, adding with physicalWidth=$physicalWidth")
                     val index = imageDatabase.addImage(imageName, bitmap, physicalWidth)
+                    Log.i(TAG, "Added image $imageName to AugmentedImageDatabase, index=$index")
 
                     if (index == -1) {
                         Log.e(TAG, "Failed to add image to database: $imageName")
@@ -1516,6 +1853,7 @@ internal class AndroidARView(
                 success = false
                 when (e.javaClass.simpleName) {
                     "ImageInsufficientQualityException" -> {
+                        Log.e(TAG, "CRITICAL: Image '$imagePath' has insufficient quality for AR tracking! ${e.message}")
                         activity.runOnUiThread {
                             sessionManagerChannel.invokeMethod(
                                 "onError",
@@ -1542,6 +1880,7 @@ internal class AndroidARView(
 
     private fun setupImageTrackingAsync(imagePaths: List<String>) {
         val session = session ?: return
+        Log.i(TAG, "setupImageTrackingAsync called with imagePaths: $imagePaths")
         imageTrackingExecutor.execute {
             try {
                 val cacheKey = imageCacheKey(imagePaths)
@@ -1635,6 +1974,12 @@ internal class AndroidARView(
         fun onLayoutChanged(width: Int, height: Int) {
             viewportWidth = width
             viewportHeight = height
+            // Sudut marker dinormalisasi [0,1] jadi nilai absolutnya tidak
+            // penting, tapi HARUS > 0 agar computeMarkerScreenCorners tidak
+            // selalu null. onSurfaceChanged kadang tidak dipanggil ulang
+            // (mis. PlatformView di-resize), jadi sinkronkan di sini juga.
+            cornersViewportWidth = width
+            cornersViewportHeight = height
             displayGeometryApplied = false
             if (hasSurface) {
                 GLES20.glViewport(0, 0, width, height)
@@ -1660,6 +2005,11 @@ internal class AndroidARView(
             axisRenderer.initialize()
             planeRenderer.initialize()
             pointCloudRenderer.initialize()
+            // SurfaceTexture video dibuat di GL thread; bila setup video
+            // sudah diminta lebih dulu, langsung lanjutkan di UI thread.
+            if (markerVideoRenderer.initialize()) {
+                onMarkerVideoSurfaceReady()
+            }
             session?.setCameraTextureName(backgroundRenderer.textureId)
             isSurfaceCreated = true
             if (pendingSessionResume) {
@@ -1738,6 +2088,10 @@ internal class AndroidARView(
                 // aktif, fungsi ini batal sendiri tanpa kirim apa pun.
                 emitMarkerCorners()
 
+                // Quad video model digambar tepat di atas bidang marker
+                // (tracking per-frame; hilang bila marker tak terlihat).
+                drawMarkerVideo()
+
                 if (showPlanes) {
                     val planes = session?.getAllTrackables(Plane::class.java) ?: emptyList()
                     planeRenderer.draw(planes, viewMatrix, projectionMatrix)
@@ -1810,6 +2164,15 @@ internal class AndroidARView(
         val type: Int,
         val uri: String,
         var anchorName: String?
+    )
+
+    /// Spec video marker yang menunggu surface GL siap.
+    private data class PendingMarkerVideo(
+        val videoPath: String,
+        val kind: String,
+        val loop: Boolean,
+        val muted: Boolean,
+        val autoplay: Boolean,
     )
 
 }

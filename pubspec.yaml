@@ -37,6 +37,8 @@ dependencies:
   # Plugin AR tidak punya node video, jadi video dirender sebagai widget
   # Flutter biasa di atas ARView (lihat ArVideoOverlay).
   video_player: ^2.10.0
+  flutter_inappwebview: 6.2.0-beta.3
+  permission_handler: ^12.0.3
 
 dev_dependencies:
   flutter_test:
@@ -51,5 +53,6 @@ flutter:
     - assets/models/
     - assets/images/
     - assets/videos/
+    - assets/webar/
     - assets/audio/vo/
     - assets/audio/bgm/

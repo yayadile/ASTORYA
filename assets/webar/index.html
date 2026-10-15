@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <!-- Cegah request favicon (404-nya memicu banner error HTTP). -->
+  <link rel="icon" href="data:," />
+  <title>ASTORYA WebAR</title>
+  <!-- Semua library lokal (offline): three.js + MindAR di ./vendor/.
+       Jangan ganti ke CDN tanpa menguji. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/addons/",
+        "mindar-image-three": "./vendor/mindar-image-three.prod.js"
+      }
+    }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    /* Elemen video hanya sumber tekstur WebGL: tak terlihat tapi tetap main. */
+    #storyVideo { position: fixed; width: 4px; height: 4px; opacity: 0; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <video id="storyVideo" src="../videos/pg1.mp4" preload="auto"
+         loop="true" muted="true" playsinline webkit-playsinline></video>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { MindARThree } from 'mindar-image-three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    function bridge(name, payload) {
+      try {
+        if (window.flutter_inappwebview) {
+          window.flutter_inappwebview.callHandler(name, payload || '');
+        }
+      } catch (e) { /* di luar Flutter (debug browser): abaikan */ }
+    }
+    function fail(msg) {
+      bridge('onWebArError', msg);
+      var el = document.createElement('div');
+      el.style.cssText = 'position:fixed;left:16px;right:16px;bottom:24px;color:#fff;' +
+        'background:#A3241C;padding:12px 14px;border-radius:12px;font:14px sans-serif;';
+      el.textContent = msg;
+      document.body.appendChild(el);
+    }
+
+    // Parameter dari WebArView (?target=..&video=..&model=..&muted=..&rx=..).
+    // Default memungkinkan halaman dibuka langsung untuk debug tanpa Flutter.
+    var q = new URLSearchParams(window.location.search);
+    var target = q.get('target') || './targets.mind';
+    var videoSrc = q.get('video') || '../videos/pg1.mp4';
+    var modelUrl = q.get('model') || '../models/meshplane.glb';
+    var muted = (q.get('muted') || '1') === '1';
+    // Rotasi plane thd sumbu X anchor (derajat). -90 = mesh XZ (tiduran,
+    // normal +Y) dibaringkan ke bidang anchor XY. Tanda penting: +90 bikin
+    // plane menghadap pergi (tak terlihat); -90 + DoubleSide = tegak,
+    // terlihat, tidak mirror.
+    var rxDeg = parseFloat(q.get('rx') || '-90') || 0;
+
+    var video = document.getElementById('storyVideo');
+    video.src = videoSrc;
+    video.muted = muted;
+    video.loop = true;
+    var targetVisible = false;
+    function tryPlay() {
+      if (targetVisible && video.paused && video.readyState >= 2) {
+        video.play().catch(function () { /* autoplay ditolak: user tap dulu */ });
+      }
+    }
+    video.addEventListener('canplay', function () {
+      bridge('onVideoReady');
+      tryPlay();
+    });
+    video.addEventListener('error', function () {
+      fail('Gagal memuat video: ' + videoSrc);
+    });
+
+    var mindarThree = new MindARThree({
+      container: document.body,
+      imageTargetSrc: target,
+      maxTrack: 1,
+      uiLoading: 'yes',
+      uiScanning: 'yes',
+      uiError: 'yes',
+    });
+    var renderer = mindarThree.renderer;
+    var scene = mindarThree.scene;
+    var camera = mindarThree.camera;
+
+    var anchor = mindarThree.addAnchor(0);
+    var started = false;
+
+    anchor.onTargetFound = function () {
+      // Video main sekali lalu loop terus (tidak pause saat hilang),
+      // menyamai perilaku audio mode native yang jalan terus.
+      targetVisible = true;
+      if (!started) { started = true; }
+      tryPlay();
+      bridge('onTargetFound');
+    };
+    anchor.onTargetLost = function () {
+      targetVisible = false;
+      bridge('onTargetLost');
+    };
+
+    // Muat plane GLB lalu tempel tekstur video ke SEMUA mesh di dalamnya.
+    // Syarat GLB: punya UV + node transform identitas (lihat README).
+    // Material diganti MeshBasicMaterial DoubleSide agar kecerahan konsisten
+    // (abaikan lighting) dan terlihat dari depan walau normal menghadap pergi.
+    // Filter eksplisit: beberapa GPU merender hitam bila mipmap aktif.
+    new GLTFLoader().load(modelUrl, function (gltf) {
+      var texture = new THREE.VideoTexture(video);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.minFilter = THREE.LinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = false;
+      var found = 0;
+      gltf.scene.traverse(function (o) {
+        if (o.isMesh) {
+          found++;
+          o.material = new THREE.MeshBasicMaterial({
+            map: texture, side: THREE.DoubleSide,
+          });
+        }
+      });
+      if (!found) { fail('GLB tidak berisi mesh: ' + modelUrl); return; }
+      // Baringkan mesh XZ ke bidang anchor XY, lalu pas-kan lebar = 1 unit.
+      var tilt = new THREE.Group();
+      tilt.rotation.x = rxDeg * Math.PI / 180;
+      tilt.add(gltf.scene);
+      tilt.updateMatrixWorld(true);
+      var box = new THREE.Box3().setFromObject(tilt);
+      var w = box.max.x - box.min.x;
+      if (w > 0) { tilt.scale.setScalar(1 / w); }
+      anchor.group.add(tilt);
+      tryPlay();
+    }, undefined, function (err) {
+      fail('Gagal memuat model: ' + modelUrl +
+        ' (' + ((err && err.message) || 'unknown') + ')');
+    });
+
+    mindarThree.start().then(function () {
+      renderer.setAnimationLoop(function () {
+        renderer.render(scene, camera);
+      });
+    }).catch(function (err) {
+      fail('Gagal menyalakan tracking (kamera/target): ' +
+        ((err && err.message) || err));
+    });
+
+    window.addEventListener('error', function (ev) {
+      bridge('onWebArError', String((ev && ev.message) || 'unknown page error'));
+    });
+  </script>
+</body>
+</html>

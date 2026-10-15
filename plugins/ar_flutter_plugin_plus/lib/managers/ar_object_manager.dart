@@ -148,4 +148,43 @@ class ARObjectManager {
   removeNode(ARNode node) {
     _channel.invokeMethod<String>('removeNode', {'name': node.name});
   }
+
+  /// Siapkan video yang dirender native tepat di atas bidang marker
+  /// (GL quad per-frame, dipakai mode "video model" dengan meshplane.glb).
+  ///
+  /// [kind]: 'asset' (path asset Flutter), 'url' (http/https), atau 'file'.
+  /// Aman dipanggil sebelum surface GL siap (native menunda otomatis).
+  Future<bool?> setupMarkerVideo(
+    String videoPath, {
+    String kind = 'asset',
+    bool loop = true,
+    bool muted = true,
+    bool autoplay = false,
+    int rotation = 0,
+  }) async {
+    try {
+      return await _channel.invokeMethod<bool>('setupMarkerVideo', {
+        'videoPath': videoPath,
+        'kind': kind,
+        'loop': loop,
+        'muted': muted,
+        'autoplay': autoplay,
+        'rotation': rotation,
+      });
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Main/jeda video marker native (disinkron ke state cerita Flutter).
+  Future<void> setMarkerVideoPlaying(bool playing) {
+    return _channel.invokeMethod<void>(
+        'setMarkerVideoPlaying', {'playing': playing});
+  }
+
+  /// Kembalikan video marker native ke posisi [position] (untuk replay).
+  Future<void> seekMarkerVideo(Duration position) {
+    return _channel.invokeMethod<void>(
+        'seekMarkerVideo', {'positionMs': position.inMilliseconds});
+  }
 }

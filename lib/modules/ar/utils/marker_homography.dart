@@ -24,8 +24,11 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 /// kanan-bawah, kiri-bawah. Return `null` bila sistem degenerate (titik
 /// segaris / koordinat tidak valid).
 ///
-/// Hasil disimpan sebagai matriks kolom-vektor, dipakai langsung oleh
-/// `Transform` Flutter (baris ke-3 adalah `w` untuk pembagian perspektif).
+/// Hasil disimpan sebagai [vm.Matrix4] dengan konvensi kolom-vektor Flutter:
+/// widget 2D (x, y, 0, 1) dipetakan ke (u*w, v*w, 0, w) dengan
+/// u = h00*x + h01*y + h02, v = h10*x + h11*y + h12,
+/// w = h20*x + h21*y + 1. Suku translasi WAJIB di kolom 3
+/// (bukan kolom 2 yang merupakan sumbu Z) agar `Transform` merender benar.
 vm.Matrix4? solveHomography(List<Offset> src, List<Offset> dst) {
   if (src.length != 4 || dst.length != 4) return null;
 
@@ -62,35 +65,32 @@ vm.Matrix4? solveHomography(List<Offset> src, List<Offset> dst) {
   if (h == null) return null;
 
   // Matrix4 vector_math bersifat kolom-vektor (m * v), sama seperti konvensi
-  // Transform Flutter: hasil proyeksi dibagi komponen w (baris ke-4).
+  // Transform Flutter: widget 2D masuk sebagai (x, y, 0, 1), hasil proyeksi
+  // dibagi komponen w (baris ke-4). Translasi (h02, h12) di kolom 3, dan
+  // konstanta homogen 1 di (3,3) — BUKAN di kolom 2 (sumbu Z).
   final m = vm.Matrix4.identity()
     ..setEntry(0, 0, h[0])
     ..setEntry(0, 1, h[1])
-    ..setEntry(0, 2, h[2])
-    ..setEntry(0, 3, 0)
+    ..setEntry(0, 3, h[2])
     ..setEntry(1, 0, h[3])
     ..setEntry(1, 1, h[4])
-    ..setEntry(1, 2, h[5])
-    ..setEntry(1, 3, 0)
-    ..setEntry(2, 0, 0)
-    ..setEntry(2, 1, 0)
+    ..setEntry(1, 3, h[5])
     ..setEntry(2, 2, 1)
-    ..setEntry(2, 3, 0)
     ..setEntry(3, 0, h[6])
     ..setEntry(3, 1, h[7])
-    ..setEntry(3, 2, 1)
-    ..setEntry(3, 3, 0);
+    ..setEntry(3, 3, 1);
   return m;
 }
 
-/// Terapkan homografi (3x3 dari [solveHomography]) ke satu titik 2D, termasuk
-/// pembagian perspektif w.
+/// Terapkan homografi (dari [solveHomography]) ke satu titik 2D, termasuk
+/// pembagian perspektif w. Rumus memakai slot matriks yang sama dengan
+/// konvensi `Transform` Flutter: translasi di kolom 3, konstanta di (3,3).
 Offset applyHomography(vm.Matrix4 m, Offset p) {
-  final w = m.entry(3, 0) * p.dx + m.entry(3, 1) * p.dy + m.entry(3, 2);
+  final w = m.entry(3, 0) * p.dx + m.entry(3, 1) * p.dy + m.entry(3, 3);
   if (w.abs() < 1e-9) return p;
   return Offset(
-    (m.entry(0, 0) * p.dx + m.entry(0, 1) * p.dy + m.entry(0, 2)) / w,
-    (m.entry(1, 0) * p.dx + m.entry(1, 1) * p.dy + m.entry(1, 2)) / w,
+    (m.entry(0, 0) * p.dx + m.entry(0, 1) * p.dy + m.entry(0, 3)) / w,
+    (m.entry(1, 0) * p.dx + m.entry(1, 1) * p.dy + m.entry(1, 3)) / w,
   );
 }
 

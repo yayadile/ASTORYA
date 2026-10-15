@@ -130,8 +130,16 @@ class AstoryaArController extends ChangeNotifier {
       }
     } catch (e) {
       _error = 'Gagal memuat audio: $e';
-      _setState(ArStoryState.idle);
-      // _setState bisa no-op bila state sudah 'idle', jadi notify eksplisit
+      // Audio gagal tidak boleh membunuh video: bila ada video, cerita
+      // tetap ready agar video bisa jalan (mode suara jadi hening).
+      // Tanpa video pun, biarkan ready bila salah satu track opsional?
+      // Tidak — tanpa media sama sekali tetap idle agar HUD menampilkan error.
+      if (config.hasVideo) {
+        _setState(ArStoryState.ready);
+      } else {
+        _setState(ArStoryState.idle);
+      }
+      // _setState bisa no-op bila state sudah sama, jadi notify eksplisit
       // agar HUD pasti menampilkan banner error.
       if (!_disposed) notifyListeners();
     }
@@ -174,18 +182,41 @@ class AstoryaArController extends ChangeNotifier {
 
   // -------------------------------------------------------------- playback --
 
-  /// Mulai / lanjutkan cerita.
+  /// Mulai / lanjutkan cerita. VO + BGM dijalankan **bersamaan** agar
+  /// terdengar bareng; satu track yang gagal tidak boleh menggagalkan
+  /// track lain / video (video ikut state `playing`, bukan sukses audio).
   Future<void> play() async {
-    if (_disposed || _error != null) return;
+    if (_disposed) return;
     if (_state == ArStoryState.completed) {
       await replay();
       return;
     }
     if (_state == ArStoryState.idle) return; // media belum siap
 
-    if (config.hasBgm) await _bgm.play();
-    if (config.hasVoiceover) await _voiceover.play();
+    // Set playing DULU agar overlay video langsung jalan tanpa nunggu
+    // ExoPlayer selesai start (await play() bisa lambat/gagal di satu track).
     _setState(ArStoryState.playing);
+
+    final starts = <Future<void>>[];
+    if (config.hasBgm) {
+      starts.add(_bgm.play().catchError((Object e) {
+        _error = 'Gagal memutar BGM: $e';
+        return;
+      }));
+    }
+    if (config.hasVoiceover) {
+      starts.add(_voiceover.play().catchError((Object e) {
+        _error = 'Gagal memutar voiceover: $e';
+        return;
+      }));
+    }
+    if (starts.isNotEmpty) {
+      // Jalan bareng, tidak berurutan. Tidak di-await berurutan agar
+      // VO tidak nunggu BGM selesai start.
+      unawaited(Future.wait(starts).then((_) {
+        if (!_disposed) notifyListeners();
+      }));
+    }
   }
 
   /// Jeda semua playback (Voiceover + BGM).

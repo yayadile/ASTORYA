@@ -69,8 +69,13 @@ class ARSessionManager {
   /// Determines the types of planes ARCore and ARKit should show
   final PlaneDetectionConfig planeDetectionConfig;
 
-  /// Receives hit results from user taps with tracked planes or feature points
-  late ARHitResultHandler onPlaneOrPointTap;
+  /// Receives hit results from user taps with tracked planes or feature points.
+  ///
+  /// Nullable karena tidak semua pengalaman AR butuh tap (mis. pengalaman
+  /// marker-only yang memakai `handleTaps: false` tidak pernah menyetel
+  /// callback ini). Native tetap mengirim event `onPlaneOrPointTap` untuk
+  /// setiap tap, jadi pemanggilan di [_platformCallHandler] wajib null-check.
+  ARHitResultHandler? onPlaneOrPointTap;
 
   /// Receives detection results when tracked images are detected
   ARImageDetectionResultHandler? onImageDetected;
@@ -176,7 +181,9 @@ class ARSessionManager {
           final hitTestResults = serializedHitTestResults.map((e) {
             return ARHitTestResult.fromJson(e);
           }).toList();
-          onPlaneOrPointTap(hitTestResults);
+          // Null-check wajib: pengalaman marker-only tidak menyetel callback
+          // ini, tapi native tetap mengirim event untuk setiap tap.
+          onPlaneOrPointTap?.call(hitTestResults);
           break;
         case 'onImageDetected':
           if (onImageDetected != null) {

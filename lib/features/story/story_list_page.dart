@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../modules/ar/astorya_ar.dart';
+import '../../modules/webar/webar.dart';
 
 /// Contoh halaman pemanggil modul AR.
 ///
@@ -13,21 +14,26 @@ class StoryListPage extends StatelessWidget {
   //
   // Aset yang benar-benar ada saat ini:
   //   - Marker : 'assets/images/a4_1.png'          (A4, lebar cetak ~21 cm)
+  //   - Plane  : 'assets/models/meshplane.glb'     (plane UV-mapped marker)
   //   - Video  : 'assets/videos/pg1.mp4'
   //   - VO     : 'assets/audio/vo/page1-english.wav'
   //   - BGM    : 'assets/audio/bgm/bgm1.mp3'
-  // Model .glb belum ada - file-nya harus ditambahkan dulu ke assets/models/.
 
   /// Marker yang dipakai bersama oleh semua cerita di bawah.
   static const String _marker = 'assets/images/a4_1.png';
 
-  /// Cerita 1: contoh paling siap dicoba - marker + video + VO + BGM semua ada.
+  /// Plane yang dipakai mode "video model" (native GL quad + WebAR tekstur).
+  static const String _plane = 'assets/models/meshplane.glb';
+
+  /// Cerita 1: video 3D + audio - video ditempel pada plane di atas marker
+  /// (native: quad GL per-frame; WebAR: tekstur meshplane.glb). Tracking
+  /// beneran, bukan overlay widget.
   static final ArStoryConfig _videoStory = ArStoryConfig(
     markerImagePath: _marker,
     voiceoverUrl: 'assets/audio/vo/page1-english.wav',
     bgmUrl: 'assets/audio/bgm/bgm1.mp3',
-    videoPath: 'assets/videos/pg1.mp4',
-    videoWidthFraction: 0.82,
+    modelPath: _plane,
+    modelVideoPath: 'assets/videos/pg1.mp4',
     videoMuted: true, // audio video dibisukan, suara dari Voiceover.
     videoLoop: true,
     subtitles: const <SubtitleCue>[
@@ -52,14 +58,13 @@ class StoryListPage extends StatelessWidget {
     subtitles: const <SubtitleCue>[],
   );
 
-  /// Cerita 3: contoh memakai model 3D .glb. File .glb BELUM ada -
-  /// taruh dulu di assets/models/ lalu ganti path di bawah.
+  /// Cerita 3: plane 3D mentah (tanpa video) + VO & BGM.
   static final ArStoryConfig _modelStory = ArStoryConfig(
     markerImagePath: _marker,
     voiceoverUrl: 'assets/audio/vo/page1-english.wav',
     bgmUrl: 'assets/audio/bgm/bgm1.mp3',
-    modelPath: 'assets/models/candi_borobudur.glb', // <- file .glb belum ada
-    modelScale: 1.0,
+    modelPath: _plane,
+    modelScale: 0.64, // plane 1.414 unit x0.33 android = 0.467 -> x0.64 = 0.299m ≈ lebar marker
     modelLift: 0.02,
     subtitles: const <SubtitleCue>[
       SubtitleCue(
@@ -71,6 +76,13 @@ class StoryListPage extends StatelessWidget {
     ],
   );
 
+  /// Cerita 4: mode WebAR (MindAR di WebView) - BERDAMPINGAN dengan mode
+  /// native di atas, bukan pengganti. Memakai cerita video+audio yang sama
+  /// (VO/BGM/subtitle dipakai ulang), tapi render kamera + tracking marker
+  /// oleh MindAR. Butuh `assets/webar/targets.mind` + internet (CDN).
+  /// Lihat `lib/modules/webar/RULES.md` untuk kapan memakai mode ini.
+  static final WebArConfig _webArStory = WebArConfig(story: _videoStory);
+
   // -------------------------------------------------------------- handlers --
 
   void _openStory(BuildContext context, ArStoryConfig config) {
@@ -78,6 +90,15 @@ class StoryListPage extends StatelessWidget {
       context,
       MaterialPageRoute<void>(
         builder: (_) => AstoryaArView(config: config),
+      ),
+    );
+  }
+
+  void _openWebArStory(BuildContext context, WebArConfig config) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => WebArView(config: config),
       ),
     );
   }
@@ -92,8 +113,8 @@ class StoryListPage extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           _StoryCard(
-            title: 'Video + Audio',
-            subtitle: 'Marker a4_1 + video pg1.mp4 + VO & BGM',
+            title: 'Video 3D + Audio',
+            subtitle: 'Marker + plane GLB bertekstur video + VO & BGM',
             icon: Icons.play_circle_fill_rounded,
             onTap: () => _openStory(context, _videoStory),
           ),
@@ -107,9 +128,16 @@ class StoryListPage extends StatelessWidget {
           const SizedBox(height: 12),
           _StoryCard(
             title: 'Model 3D',
-            subtitle: 'Marker a4_1 + model .glb (file belum ada)',
+            subtitle: 'Marker + plane meshplane.glb mentah + VO & BGM',
             icon: Icons.temple_buddhist,
             onTap: () => _openStory(context, _modelStory),
+          ),
+          const SizedBox(height: 12),
+          _StoryCard(
+            title: 'WebAR (MindAR)',
+            subtitle: 'Mode browser: video nempel marker, butuh targets.mind',
+            icon: Icons.public_rounded,
+            onTap: () => _openWebArStory(context, _webArStory),
           ),
         ],
       ),

@@ -63,6 +63,10 @@ class _AstoryaArViewState extends State<AstoryaArView> {
   /// Guard agar event tracking rapat tidak membuat node ganda.
   bool _nodeAddInFlight = false;
 
+  /// Status terakhir sudut marker, untuk log transisi warp <-> flat
+  /// (sekali per perubahan, bukan tiap frame).
+  bool _cornersActive = false;
+
   /// Sudut layar marker per frame dari native, diteruskan ke
   /// [ArVideoOverlay] agar video bisa di-warp menempel pada marker.
   final ValueNotifier<ARMarkerCorners?> _markerCorners =
@@ -79,8 +83,25 @@ class _AstoryaArViewState extends State<AstoryaArView> {
     }
 
     _controller = AstoryaArController(widget.config);
+    _controller.addListener(_onControllerChanged);
     if (validationError == null) {
       unawaited(_controller.init());
+    }
+  }
+
+  /// Teruskan state cerita ke video marker native (main/jeda/seek replay),
+  /// sejajar dengan [ArVideoOverlay] pada mode overlay widget.
+  void _onControllerChanged() {
+    if (_disposed) return;
+    final objects = _objectManager;
+    if (objects == null || !widget.config.hasModelVideo) return;
+    final c = _controller;
+    unawaited(
+      objects.setMarkerVideoPlaying(c.markerDetected && c.isPlaying),
+    );
+    // Saat cerita diulang (replay), kembalikan video ke detik 0.
+    if (c.state == ArStoryState.ready) {
+      unawaited(objects.seekMarkerVideo(Duration.zero));
     }
   }
 
@@ -126,6 +147,13 @@ class _AstoryaArViewState extends State<AstoryaArView> {
 
       arObjectManager.onInitialize();
 
+      // Mode "video model": siapkan video marker native (quad GL yang
+      // nempel marker per-frame). Node Filament TIDAK dipakai - quad
+      // diposisikan langsung dari sudut marker ARCore tiap frame.
+      if (widget.config.hasModelVideo) {
+        unawaited(_setupMarkerVideo());
+      }
+
       if (!_disposed && mounted) {
         setState(() => _sessionInitialized = true);
       }
@@ -156,8 +184,12 @@ class _AstoryaArViewState extends State<AstoryaArView> {
   ) async {
     if (_disposed || !mounted) return;
 
+    final first = !_controller.markerDetected;
     await _syncVisualToMarker(transformation);
     _controller.onMarkerDetected();
+    if (first) {
+      debugPrint('[ASTORYA] marker terdeteksi: $imageName (video mulai)');
+    }
   }
 
   /// Sudut layar marker tiap frame dari native. Nilai `null` = marker hilang
@@ -167,12 +199,54 @@ class _AstoryaArViewState extends State<AstoryaArView> {
   /// sangat rapat (~tiap frame); rebuild dibatasi pada overlay video.
   void _onMarkerCorners(ARMarkerCorners? corners) {
     if (_disposed) return;
+    final active = corners != null;
+    if (active != _cornersActive) {
+      _cornersActive = active;
+      debugPrint(
+        active
+            ? '[ASTORYA] sudut marker AKTIF -> video warp nempel marker'
+            : '[ASTORYA] sudut marker HILANG -> video jatuh ke tengah (flat)',
+      );
+    }
     _markerCorners.value = corners;
+  }
+
+  /// Siapkan video marker native untuk mode "video model".
+  Future<void> _setupMarkerVideo() async {
+    final objects = _objectManager;
+    if (objects == null || _disposed) return;
+    final config = widget.config;
+    final raw = config.modelVideoPath!.trim();
+    final kind = ArStoryConfig.isNetworkSource(raw)
+        ? 'url'
+        : _isFilePath(raw)
+            ? 'file'
+            : 'asset';
+    await objects.setupMarkerVideo(
+      ArStoryConfig.normalizeAssetKey(raw),
+      kind: kind,
+      loop: config.videoLoop,
+      muted: config.videoMuted,
+      autoplay: _controller.markerDetected && _controller.isPlaying,
+      rotation: config.modelVideoRotation,
+    );
+    if (_disposed) return;
+    // Samakan dengan state terkini (mis. marker terdeteksi lebih dulu).
+    _onControllerChanged();
+  }
+
+  static bool _isFilePath(String path) {
+    final p = path.trim();
+    return p.startsWith('file://') ||
+        p.startsWith('/') ||
+        RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(p);
   }
 
   // ============================================================== VISUAL ====
 
   Future<void> _syncVisualToMarker(vm.Matrix4 markerTransform) async {
+    // Mode "video model": tanpa node - video dirender native sebagai quad GL.
+    if (widget.config.hasModelVideo) return;
     final kind = widget.config.visualKind;
     if (kind == ArVisualKind.none) return;
 
@@ -319,6 +393,7 @@ class _AstoryaArViewState extends State<AstoryaArView> {
       _disposed = true;
 
       // 1. Hentikan audio dulu agar suara tidak nyangkut.
+      _controller.removeListener(_onControllerChanged);
       _controller.dispose();
       _markerCorners.dispose();
 

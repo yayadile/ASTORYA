@@ -62,7 +62,6 @@ class _ArVideoOverlayState extends State<ArVideoOverlay> {
   /// datar (mis. iOS).
   final ValueNotifier<ARMarkerCorners?> _corners =
       ValueNotifier<ARMarkerCorners?>(null);
-  bool _cornersEverReceived = false;
 
   @override
   void initState() {
@@ -84,9 +83,7 @@ class _ArVideoOverlayState extends State<ArVideoOverlay> {
   }
 
   void _onCornersChanged() {
-    final incoming = widget.markerCorners?.value;
-    if (incoming != null) _cornersEverReceived = true;
-    _corners.value = incoming;
+    _corners.value = widget.markerCorners?.value;
   }
 
   Future<void> _setupVideo() async {
@@ -181,25 +178,23 @@ class _ArVideoOverlayState extends State<ArVideoOverlay> {
     if (video == null || _error != null) return const SizedBox.shrink();
 
     // Tunggu marker terdeteksi baru tampilkan (sebelumnya layar kosong).
+    // Setelah marker PERNAH terdeteksi, video TETAP tampil walau marker
+    // hilang sesaat (mis. user rotate HP) — jatuh ke overlay datar agar
+    // tidak kedip hilang.
     if (!_initialized || !widget.controller.markerDetected) {
-      return const SizedBox.shrink();
-    }
-
-    // Sudut pernah diterima tapi sekarang null = marker hilang: sembunyikan
-    // video agar tidak "mengambang" di posisi terakhir.
-    final corners = _corners.value;
-    if (_cornersEverReceived && corners == null) {
       return const SizedBox.shrink();
     }
 
     final aspect = video.value.aspectRatio <= 0 ? 16 / 9 : video.value.aspectRatio;
 
     // Mode warp: video menempel perspektif pada marker (Android, native fork).
+    final corners = _corners.value;
     if (corners != null) {
       return _buildWarpedVideo(context, video, corners, aspect);
     }
 
-    // Fallback datar (native tidak mengirim sudut, mis. iOS).
+    // Sudut belum ada / hilang sesaat / warp gagal (quad/matrix null):
+    // tampilkan datar di tengah agar video tetap kelihatan saat rotate HP.
     return _buildFlatVideo(context, video, aspect);
   }
 
@@ -228,7 +223,10 @@ class _ArVideoOverlayState extends State<ArVideoOverlay> {
               markerAspect: corners.markerAspect <= 0 ? 1 : corners.markerAspect,
               videoAspect: aspect,
             );
-            if (quad == null) return const SizedBox.shrink();
+            // Warp gagal (marker nyaris sejajar garis pandang / titik
+            // degenerate): jatuh ke overlay datar agar video tetap kelihatan
+            // saat rotate HP, bukan hilang.
+            if (quad == null) return _buildFlatVideo(context, video, aspect);
 
             // Ukuran sumber (dipakai rasterisasi video). Kualitas makin tajam
             // bila mendekati ukuran quad di layar; kalikan devicePixelRatio
@@ -239,7 +237,9 @@ class _ArVideoOverlayState extends State<ArVideoOverlay> {
             final srcSize = Size(srcWidth, srcWidth / aspect);
 
             final matrix = videoWarpMatrix(srcSize: srcSize, quad: quad);
-            if (matrix == null) return const SizedBox.shrink();
+            // Matriks liar (sudut nyaris segaris saat rotate ekstrem):
+            // fallback datar, jangan hilangkan video.
+            if (matrix == null) return _buildFlatVideo(context, video, aspect);
 
             return Stack(
               children: [
@@ -255,8 +255,17 @@ class _ArVideoOverlayState extends State<ArVideoOverlay> {
                     child: SizedBox(
                       width: srcSize.width,
                       height: srcSize.height,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
+                      // Full-bleed menempel marker: TANPA radius/shadow agar
+                      // terlihat menyatu dengan kertas, bukan seperti player.
+                      // Border hairline ikut ter-warp sehingga tepi video
+                      // terlihat jelas menempel pada tepi marker.
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: const Color(0xB3FFFFFF),
+                            width: 2,
+                          ),
+                        ),
                         child: VideoPlayer(video),
                       ),
                     ),
