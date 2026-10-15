@@ -161,7 +161,7 @@ class ARObjectManager {
     bool muted = true,
     bool autoplay = false,
     int rotation = 0,
-    bool upright = false,
+    bool mirror = false,
   }) async {
     try {
       return await _channel.invokeMethod<bool>('setupMarkerVideo', {
@@ -171,7 +171,7 @@ class ARObjectManager {
         'muted': muted,
         'autoplay': autoplay,
         'rotation': rotation,
-        'upright': upright,
+        'mirror': mirror,
       });
     } on PlatformException {
       return false;

@@ -36,7 +36,7 @@ class ArStoryConfig {
     this.modelPath,
     this.modelVideoPath,
     this.modelVideoRotation = 0,
-    this.modelVideoUpright = false,
+    this.modelVideoMirrored = false,
     this.overlayImagePath,
     this.modelScale = 1.0,
     this.modelLift = 0.0,
@@ -130,13 +130,13 @@ class ArStoryConfig {
   /// berpengaruh ke audio/subtitle.
   final int modelVideoRotation;
 
-  /// Quad video digambar TEGAK menghadap kamera (billboard pop-up) dengan
-  /// kaki di tengah marker, bukan rebah di bidang kertas.
+  /// Balik video secara horizontal (efek kaca).
   ///
-  /// Posisi tetap tracking 3D per-frame; hanya orientasinya yang selalu
-  /// menghadap kamera. Lebar = lebar fisik marker, tinggi mengikuti aspek
-  /// video. `false` (default) = rebah menempel kertas seperti sebelumnya.
-  final bool modelVideoUpright;
+  /// `true` bila teks/gambar di video tampak kebaca terbalik kiri-kanan
+  /// di atas marker (sumbu-X marker vs layar berlawanan arah). Tidak
+  /// berpengaruh ke audio/subtitle. Bisa dikombinasi dengan
+  /// [modelVideoRotation].
+  final bool modelVideoMirrored;
 
   /// Path asset gambar 2D (.png) yang dirender di atas marker,
   /// dipakai bila [modelPath] tidak diisi.

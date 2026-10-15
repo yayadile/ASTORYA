@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../modules/ar/astorya_ar.dart';
-import '../../modules/webar/webar.dart';
 
 /// Contoh halaman pemanggil modul AR.
 ///
@@ -64,64 +63,11 @@ class StoryListPage extends StatelessWidget {
     modelPath: _plane,
     modelVideoPath: 'assets/videos/pg1.mp4',
     modelVideoRotation: 180,
+    modelVideoMirrored: true,
     videoMuted: true, // audio video dibisukan, suara dari Voiceover.
     videoLoop: true,
     subtitles: _page1Cues,
   );
-
-  /// Cerita 2: video 3D TANPA audio (VO & BGM sengaja dikosongkan).
-  /// Memakai mode "video model" yang sama (plane + quad GL native), jadi
-  /// tetap nempel 3D di atas marker — bukan overlay widget datar.
-  /// Tanpa Voiceover tidak ada timeline, jadi subtitle selalu kosong.
-  static final ArStoryConfig _videoOnly = ArStoryConfig(
-    markerImagePath: _marker,
-    // voiceoverUrl & bgmUrl tidak diisi -> cerita tetap jalan (hening).
-    modelPath: _plane,
-    modelVideoPath: 'assets/videos/pg1.mp4',
-    modelVideoRotation: 180,
-    videoMuted: true,
-    videoLoop: true,
-    subtitles: const <SubtitleCue>[],
-  );
-
-  /// Cerita 3: video 3D + VO (tanpa BGM) — plane yang sama bertekstur video.
-  /// Sebelumnya config ini hanya menampilkan `meshplane.glb` mentah tanpa
-  /// video sehingga terlihat seperti "model tidak muncul" (plane-nya
-  /// transparan). Kini diisi `modelVideoPath` agar selalu ada visual.
-  static final ArStoryConfig _modelStory = ArStoryConfig(
-    markerImagePath: _marker,
-    voiceoverUrl: 'assets/audio/vo/page1-english.wav',
-    modelPath: _plane,
-    modelVideoPath: 'assets/videos/pg1.mp4',
-    modelVideoRotation: 180,
-    videoMuted: true,
-    videoLoop: true,
-    subtitles: _page1Cues,
-  );
-
-  /// Cerita 5: video POP-UP tegak (billboard) — konten sama dengan cerita 1
-  /// (VO + BGM + subtitle Dendaka), tapi quad digambar vertikal menghadap
-  /// kamera dengan kaki di tengah marker, bukan rebah di kertas.
-  /// Untuk demo perbandingan: buka tombol 1 vs tombol ini bergantian.
-  static final ArStoryConfig _uprightStory = ArStoryConfig(
-    markerImagePath: _marker,
-    voiceoverUrl: 'assets/audio/vo/page1-english.wav',
-    bgmUrl: 'assets/audio/bgm/bgm1.mp3',
-    modelPath: _plane,
-    modelVideoPath: 'assets/videos/pg1.mp4',
-    modelVideoRotation: 180,
-    modelVideoUpright: true,
-    videoMuted: true,
-    videoLoop: true,
-    subtitles: _page1Cues,
-  );
-
-  /// Cerita 4: mode WebAR (MindAR di WebView) - BERDAMPINGAN dengan mode
-  /// native di atas, bukan pengganti. Memakai cerita video+audio yang sama
-  /// (VO/BGM/subtitle dipakai ulang), tapi render kamera + tracking marker
-  /// oleh MindAR. Butuh `assets/webar/targets.mind` + internet (CDN).
-  /// Lihat `lib/modules/webar/RULES.md` untuk kapan memakai mode ini.
-  static final WebArConfig _webArStory = WebArConfig(story: _videoStory);
 
   // -------------------------------------------------------------- handlers --
 
@@ -130,15 +76,6 @@ class StoryListPage extends StatelessWidget {
       context,
       MaterialPageRoute<void>(
         builder: (_) => AstoryaArView(config: config),
-      ),
-    );
-  }
-
-  void _openWebArStory(BuildContext context, WebArConfig config) {
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => WebArView(config: config),
       ),
     );
   }
@@ -157,34 +94,6 @@ class StoryListPage extends StatelessWidget {
             subtitle: 'Marker + plane GLB bertekstur video + VO & BGM',
             icon: Icons.play_circle_fill_rounded,
             onTap: () => _openStory(context, _videoStory),
-          ),
-          const SizedBox(height: 12),
-          _StoryCard(
-            title: 'Video Saja (Tanpa Audio)',
-            subtitle: 'Plane + video 3D nempel marker, hening tanpa VO/BGM',
-            icon: Icons.videocam_rounded,
-            onTap: () => _openStory(context, _videoOnly),
-          ),
-          const SizedBox(height: 12),
-          _StoryCard(
-            title: 'Video + VO (Tanpa BGM)',
-            subtitle: 'Plane + video 3D + subtitle Dendaka Forest',
-            icon: Icons.temple_buddhist,
-            onTap: () => _openStory(context, _modelStory),
-          ),
-          const SizedBox(height: 12),
-          _StoryCard(
-            title: 'Video Pop-Up (Tegak)',
-            subtitle: 'Video berdiri billboard, kaki di tengah marker',
-            icon: Icons.slideshow_rounded,
-            onTap: () => _openStory(context, _uprightStory),
-          ),
-          const SizedBox(height: 12),
-          _StoryCard(
-            title: 'WebAR (MindAR)',
-            subtitle: 'Mode browser: video nempel marker, butuh targets.mind',
-            icon: Icons.public_rounded,
-            onTap: () => _openWebArStory(context, _webArStory),
           ),
         ],
       ),

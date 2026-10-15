@@ -18,7 +18,6 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
-import kotlin.math.sqrt
 import android.view.PixelCopy
 import android.view.View
 import android.widget.Toast
@@ -157,9 +156,9 @@ internal class AndroidARView(
     // yang mematikan player (inilah "gagal diputar (what=-38)").
     private var markerVideoStarted = false
     private var markerVideoRotation = 0
-    // Mode "pop-up": quad digambar TEGAK menghadap kamera (billboard) dengan
-    // kaki di tengah marker, bukan rebah di bidang kertas.
-    private var markerVideoUpright = false
+    // Balik horizontal (efek kaca): true bila sumbu-X marker vs layar
+    // berlawanan arah sehingga teks video terbaca terbalik.
+    private var markerVideoMirror = false
     // Mode fullscreen: quad digambar menutupi layar (contain-fit), kamera
     // tidak digambar (efek bioskop). Player tetap sama -> audio VO/BGM
     // tidak terganggu (tanpa player kedua = tanpa rebutan audio focus).
@@ -367,8 +366,8 @@ internal class AndroidARView(
                                     (call.argument<Number>("rotation")?.toInt())
                                         ?: 0
                                 markerVideoRotation = rotation
-                                markerVideoUpright =
-                                    call.argument<Boolean>("upright") ?: false
+                                markerVideoMirror =
+                                    call.argument<Boolean>("mirror") ?: false
                                 setupMarkerVideo(
                                     videoPath, kind, loop, muted, autoplay)
                                 result.success(true)
@@ -395,7 +394,7 @@ internal class AndroidARView(
                                 "hasPending" to (pendingMarkerVideo != null),
                                 "rendererReady" to markerVideoRenderer.isReady(),
                                 "wantedPlaying" to markerVideoWantedPlaying,
-                                "upright" to markerVideoUpright,
+                                "mirror" to markerVideoMirror,
                                 "fullscreen" to markerVideoFullscreen,
                                 "drawCalls" to dbgDrawCalls,
                                 "drewFrames" to dbgDrewFrames,
@@ -1562,11 +1561,7 @@ internal class AndroidARView(
         val halfW = image.extentX / 2.0f
         val halfH = image.extentZ / 2.0f
 
-        // 4 titik DUNIA quad — dua mode:
-        // - rebah (default): 4 sudut fisik marker (Y lokal = 0).
-        // - tegak (billboard): quad vertikal menghadap kamera, kaki di
-        //   tengah marker. Lebar = lebar fisik marker, tinggi mengikuti
-        //   aspek video agar tidak gepeng.
+        // 4 titik DUNIA quad = 4 sudut fisik marker (Y lokal = 0).
         val worldCorners = FloatArray(12)
 
         // Rotasi vektor lokal -> dunia memakai quaternion pose (pengganti
@@ -1586,103 +1581,27 @@ internal class AndroidARView(
             out[2] = lz + qw * tz + (qx * ty - qy * tx)
         }
 
-        if (!markerVideoUpright) {
-            // 0: top-left     (-halfW, 0f, -halfH)
-            // 1: top-right    ( halfW, 0f, -halfH)
-            // 2: bottom-right ( halfW, 0f,  halfH)
-            // 3: bottom-left  (-halfW, 0f,  halfH)
-            val tmp = FloatArray(3)
-            rotVec(-halfW, 0f, -halfH, tmp)
-            worldCorners[0] = pt[0] + tmp[0]
-            worldCorners[1] = pt[1] + tmp[1]
-            worldCorners[2] = pt[2] + tmp[2]
-            rotVec(halfW, 0f, -halfH, tmp)
-            worldCorners[3] = pt[0] + tmp[0]
-            worldCorners[4] = pt[1] + tmp[1]
-            worldCorners[5] = pt[2] + tmp[2]
-            rotVec(halfW, 0f, halfH, tmp)
-            worldCorners[6] = pt[0] + tmp[0]
-            worldCorners[7] = pt[1] + tmp[1]
-            worldCorners[8] = pt[2] + tmp[2]
-            rotVec(-halfW, 0f, halfH, tmp)
-            worldCorners[9] = pt[0] + tmp[0]
-            worldCorners[10] = pt[1] + tmp[1]
-            worldCorners[11] = pt[2] + tmp[2]
-        } else {
-            val vw = markerVideoPlayer?.videoWidth ?: 0
-            val vh = markerVideoPlayer?.videoHeight ?: 0
-            val aspect = if (vw > 0 && vh > 0) vw.toFloat() / vh else 16f / 9f
-            val wHalf = image.extentX / 2f
-            val hHalf = image.extentX / aspect / 2f
-            // Sumbu X marker + normal marker di ruang dunia.
-            val xAxis = FloatArray(3)
-            val normal = FloatArray(3)
-            rotVec(1f, 0f, 0f, xAxis)
-            rotVec(0f, 1f, 0f, normal)
-            // Tengah quad: tengah marker + normal * (setengah tinggi + 1 cm)
-            // sehingga tepi bawahnya menapak di atas kertas.
-            val cx = pt[0] + normal[0] * (hHalf + 0.01f)
-            val cy = pt[1] + normal[1] * (hHalf + 0.01f)
-            val cz = pt[2] + normal[2] * (hHalf + 0.01f)
-            // Normal quad menghadap kamera.
-            val camPos = camera.pose.translation
-            var nx = camPos[0] - cx
-            var ny = camPos[1] - cy
-            var nz = camPos[2] - cz
-            var nl = sqrt(nx * nx + ny * ny + nz * nz)
-            if (nl < 1e-6f) {
-                nx = normal[0]
-                ny = normal[1]
-                nz = normal[2]
-                nl = sqrt(nx * nx + ny * ny + nz * nz)
-                if (nl < 1e-6f) {
-                    nx = 0f
-                    ny = 0f
-                    nz = 1f
-                    nl = 1f
-                }
-            }
-            nx /= nl
-            ny /= nl
-            nz /= nl
-            // right = normalize(cross(up0, n)); fallback sumbu X marker
-            // bila kamera tepat di atas (degenerat).
-            var rx = nz
-            var ry = 0f
-            var rz = -nx
-            var rl = sqrt(rx * rx + rz * rz)
-            if (rl < 1e-6f) {
-                rx = xAxis[0]
-                ry = xAxis[1]
-                rz = xAxis[2]
-                rl = sqrt(rx * rx + ry * ry + rz * rz)
-                if (rl < 1e-6f) {
-                    rx = 1f
-                    ry = 0f
-                    rz = 0f
-                    rl = 1f
-                }
-            }
-            rx /= rl
-            ry /= rl
-            rz /= rl
-            // up = cross(n, r) — tegak lurus kamera & right.
-            val ux = ny * rz - nz * ry
-            val uy = nz * rx - nx * rz
-            val uz = nx * ry - ny * rx
-            worldCorners[0] = cx - rx * wHalf + ux * hHalf
-            worldCorners[1] = cy - ry * wHalf + uy * hHalf
-            worldCorners[2] = cz - rz * wHalf + uz * hHalf
-            worldCorners[3] = cx + rx * wHalf + ux * hHalf
-            worldCorners[4] = cy + ry * wHalf + uy * hHalf
-            worldCorners[5] = cz + rz * wHalf + uz * hHalf
-            worldCorners[6] = cx + rx * wHalf - ux * hHalf
-            worldCorners[7] = cy + ry * wHalf - uy * hHalf
-            worldCorners[8] = cz + rz * wHalf - uz * hHalf
-            worldCorners[9] = cx - rx * wHalf - ux * hHalf
-            worldCorners[10] = cy - ry * wHalf - uy * hHalf
-            worldCorners[11] = cz - rz * wHalf - uz * hHalf
-        }
+        // 0: top-left     (-halfW, 0f, -halfH)
+        // 1: top-right    ( halfW, 0f, -halfH)
+        // 2: bottom-right ( halfW, 0f,  halfH)
+        // 3: bottom-left  (-halfW, 0f,  halfH)
+        val tmp = FloatArray(3)
+        rotVec(-halfW, 0f, -halfH, tmp)
+        worldCorners[0] = pt[0] + tmp[0]
+        worldCorners[1] = pt[1] + tmp[1]
+        worldCorners[2] = pt[2] + tmp[2]
+        rotVec(halfW, 0f, -halfH, tmp)
+        worldCorners[3] = pt[0] + tmp[0]
+        worldCorners[4] = pt[1] + tmp[1]
+        worldCorners[5] = pt[2] + tmp[2]
+        rotVec(halfW, 0f, halfH, tmp)
+        worldCorners[6] = pt[0] + tmp[0]
+        worldCorners[7] = pt[1] + tmp[1]
+        worldCorners[8] = pt[2] + tmp[2]
+        rotVec(-halfW, 0f, halfH, tmp)
+        worldCorners[9] = pt[0] + tmp[0]
+        worldCorners[10] = pt[1] + tmp[1]
+        worldCorners[11] = pt[2] + tmp[2]
 
         val viewMatrix = FloatArray(16)
         val projectionMatrix = FloatArray(16)
@@ -1948,7 +1867,7 @@ internal class AndroidARView(
                     16f / 9f
                 }
             if (markerVideoRenderer.drawFullscreen(
-                    vw, vh, aspect, markerVideoRotation)) {
+                    vw, vh, aspect, markerVideoRotation, markerVideoMirror)) {
                 dbgDrewFrames++
             } else {
                 dbgDrawSkipped++
@@ -1969,7 +1888,7 @@ internal class AndroidARView(
             Log.i(TAG, "DBG_CORNERS " +
                 corners.joinToString(",") { "%.3f".format(it) })
         }
-        if (markerVideoRenderer.draw(corners, markerVideoRotation)) {
+        if (markerVideoRenderer.draw(corners, markerVideoRotation, markerVideoMirror)) {
             dbgDrewFrames++
         } else {
             dbgDrawSkipped++

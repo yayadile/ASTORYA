@@ -230,7 +230,8 @@ class _AstoryaArViewState extends State<AstoryaArView> {
             : 'asset';
     final key = ArStoryConfig.normalizeAssetKey(raw);
     debugPrint('[ASTORYA] setupMarkerVideo: kind=$kind path=$key '
-        'upright=${config.modelVideoUpright} rotation=${config.modelVideoRotation}');
+        'rotation=${config.modelVideoRotation} '
+        'mirror=${config.modelVideoMirrored}');
     try {
       final ok = await objects.setupMarkerVideo(
         key,
@@ -239,7 +240,7 @@ class _AstoryaArViewState extends State<AstoryaArView> {
         muted: config.videoMuted,
         autoplay: _controller.markerDetected && _controller.isPlaying,
         rotation: config.modelVideoRotation,
-        upright: config.modelVideoUpright,
+        mirror: config.modelVideoMirrored,
       );
       debugPrint('[ASTORYA] setupMarkerVideo result: $ok');
     } catch (e) {

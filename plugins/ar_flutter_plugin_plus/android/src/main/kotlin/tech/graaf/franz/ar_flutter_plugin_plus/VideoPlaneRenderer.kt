@@ -88,7 +88,11 @@ internal class VideoPlaneRenderer {
     /// [rotationDegrees] memutar konten video searah jarum jam (0/90/180/
     /// 270) untuk menyamakan orientasi cetak marker: sudut layar `i`
     /// menampilkan konten sudut `(i - rot)`.
-    fun draw(cornersNorm: DoubleArray, rotationDegrees: Int = 0): Boolean {
+    fun draw(
+        cornersNorm: DoubleArray,
+        rotationDegrees: Int = 0,
+        mirror: Boolean = false,
+    ): Boolean {
         if (cornersNorm.size != 8) return false
         if (program == 0 || oesTexId == 0) return false
         val tm = latchFrame() ?: return false
@@ -102,7 +106,7 @@ internal class VideoPlaneRenderer {
             pos[i * 2 + 1] = 1f - ny * 2f
         }
         val uv = FloatArray(8)
-        fillUv(uv, rot, tm)
+        fillUv(uv, rot, tm, mirror)
         submit(pos, uv)
         return true
     }
@@ -118,6 +122,7 @@ internal class VideoPlaneRenderer {
         vpH: Int,
         aspect: Float,
         rotationDegrees: Int = 0,
+        mirror: Boolean = false,
     ): Boolean {
         if (program == 0 || oesTexId == 0) return false
         if (vpW <= 0 || vpH <= 0) return false
@@ -135,7 +140,7 @@ internal class VideoPlaneRenderer {
             -rw / 2f, -rh / 2f, // BL
         )
         val uv = FloatArray(8)
-        fillUv(uv, rot, tm)
+        fillUv(uv, rot, tm, mirror)
         submit(pos, uv)
         return true
     }
@@ -161,11 +166,13 @@ internal class VideoPlaneRenderer {
     }
 
     /// Isi UV video: TL=(0,0) TR=(1,0) BR=(1,1) BL=(0,1), ditransform
-    /// matriks SurfaceTexture (rotasi frame kamera).
-    private fun fillUv(uv: FloatArray, rot: Int, tm: FloatArray) {
+    /// matriks SurfaceTexture (rotasi frame kamera). [mirror] membalik
+    /// sumbu-U (koreksi efek kaca).
+    private fun fillUv(uv: FloatArray, rot: Int, tm: FloatArray, mirror: Boolean) {
         for (i in 0 until 4) {
             val ui = (i - rot + 4) % 4
-            val u = if (ui == 0 || ui == 3) 0f else 1f
+            val u0 = if (ui == 0 || ui == 3) 0f else 1f
+            val u = if (mirror) 1f - u0 else u0
             val v = if (ui < 2) 0f else 1f
             uv[i * 2] = tm[0] * u + tm[4] * v + tm[12]
             uv[i * 2 + 1] = tm[1] * u + tm[5] * v + tm[13]
