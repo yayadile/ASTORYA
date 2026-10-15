@@ -36,6 +36,7 @@ class ArStoryConfig {
     this.modelPath,
     this.modelVideoPath,
     this.modelVideoRotation = 0,
+    this.modelVideoUpright = false,
     this.overlayImagePath,
     this.modelScale = 1.0,
     this.modelLift = 0.0,
@@ -128,6 +129,14 @@ class ArStoryConfig {
   /// kebalik di atas kertas, naikkan ke 90/180/270 sampai tegak. Tidak
   /// berpengaruh ke audio/subtitle.
   final int modelVideoRotation;
+
+  /// Quad video digambar TEGAK menghadap kamera (billboard pop-up) dengan
+  /// kaki di tengah marker, bukan rebah di bidang kertas.
+  ///
+  /// Posisi tetap tracking 3D per-frame; hanya orientasinya yang selalu
+  /// menghadap kamera. Lebar = lebar fisik marker, tinggi mengikuti aspek
+  /// video. `false` (default) = rebah menempel kertas seperti sebelumnya.
+  final bool modelVideoUpright;
 
   /// Path asset gambar 2D (.png) yang dirender di atas marker,
   /// dipakai bila [modelPath] tidak diisi.

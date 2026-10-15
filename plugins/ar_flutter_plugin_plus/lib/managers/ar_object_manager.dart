@@ -161,6 +161,7 @@ class ARObjectManager {
     bool muted = true,
     bool autoplay = false,
     int rotation = 0,
+    bool upright = false,
   }) async {
     try {
       return await _channel.invokeMethod<bool>('setupMarkerVideo', {
@@ -170,6 +171,7 @@ class ARObjectManager {
         'muted': muted,
         'autoplay': autoplay,
         'rotation': rotation,
+        'upright': upright,
       });
     } on PlatformException {
       return false;
@@ -180,6 +182,19 @@ class ARObjectManager {
   Future<void> setMarkerVideoPlaying(bool playing) {
     return _channel.invokeMethod<void>(
         'setMarkerVideoPlaying', {'playing': playing});
+  }
+
+  /// Status diagnostik video marker native (dipakai log [ASTORYA]).
+  /// `null` bila channel belum siap. Isi: prepared, started, hasPlayer,
+  /// hasPending, rendererReady, wantedPlaying.
+  Future<Map<String, dynamic>?> isMarkerVideoReady() async {
+    try {
+      final res = await _channel.invokeMapMethod<String, dynamic>(
+          'isMarkerVideoReady');
+      return res == null ? null : Map<String, dynamic>.from(res);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Kembalikan video marker native ke posisi [position] (untuk replay).

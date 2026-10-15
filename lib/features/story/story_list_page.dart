@@ -18,12 +18,41 @@ class StoryListPage extends StatelessWidget {
   //   - Video  : 'assets/videos/pg1.mp4'
   //   - VO     : 'assets/audio/vo/page1-english.wav'
   //   - BGM    : 'assets/audio/bgm/bgm1.mp3'
+  //   - SRT    : 'assets/srt/page1-english.srt'    (sumber teks subtitle,
+  //              disalin manual ke _page1Cues di bawah)
 
   /// Marker yang dipakai bersama oleh semua cerita di bawah.
   static const String _marker = 'assets/images/a4_1.png';
 
   /// Plane yang dipakai mode "video model" (native GL quad + WebAR tekstur).
   static const String _plane = 'assets/models/meshplane.glb';
+
+  /// Subtitle cerita halaman 1 — disalin dari `assets/srt/page1-english.srt`
+  /// (file .srt TIDAK dibaca otomatis oleh app, jadi setiap ubah .srt wajib
+  /// salin ulang ke sini lalu rebuild).
+  ///
+  /// Sinkron ke posisi Voiceover, jadi hanya tampil pada config yang mengisi
+  /// `voiceoverUrl`. Rentang waktu harus sama dengan .srt.
+  static const List<SubtitleCue> _page1Cues = <SubtitleCue>[
+    SubtitleCue(
+      start: 0.0,
+      end: 6.0,
+      id: 'Di Hutan Dendaka yang indah,\nSinta melihat kijang emas yang berkilau.',
+      en: 'In the beautiful Dendaka Forest,\nSinta saw dazzling golden deer.',
+    ),
+    SubtitleCue(
+      start: 6.0,
+      end: 8.36,
+      id: 'Dia meminta Rama untuk menangkapnya.',
+      en: 'She asked Rama to catch it for her.',
+    ),
+    SubtitleCue(
+      start: 8.36,
+      end: 14.16,
+      id: 'Demi membahagiakan istrinya, Rama masuk jauh ke dalam\nhutan gelap untuk mengejar kijang emas itu.',
+      en: 'To make his wife happy, Rama went deep into\nthe dark forest to chase the golden deer',
+    ),
+  ];
 
   /// Cerita 1: video 3D + audio - video ditempel pada plane di atas marker
   /// (native: quad GL per-frame; WebAR: tekstur meshplane.glb). Tracking
@@ -34,46 +63,57 @@ class StoryListPage extends StatelessWidget {
     bgmUrl: 'assets/audio/bgm/bgm1.mp3',
     modelPath: _plane,
     modelVideoPath: 'assets/videos/pg1.mp4',
+    modelVideoRotation: 180,
     videoMuted: true, // audio video dibisukan, suara dari Voiceover.
     videoLoop: true,
-    subtitles: const <SubtitleCue>[
-      SubtitleCue(
-        start: 0.0,
-        end: 5.0,
-        id: 'Selamat datang di cerita ASTORYA.',
-        en: 'Welcome to the ASTORYA story.',
-      ),
-    ],
+    subtitles: _page1Cues,
   );
 
-  /// Cerita 2: video TANPA audio (VO & BGM sengaja dikosongkan).
-  /// Berguna buat test murni video/marker tanpa ribet nyiapin suara.
+  /// Cerita 2: video 3D TANPA audio (VO & BGM sengaja dikosongkan).
+  /// Memakai mode "video model" yang sama (plane + quad GL native), jadi
+  /// tetap nempel 3D di atas marker — bukan overlay widget datar.
+  /// Tanpa Voiceover tidak ada timeline, jadi subtitle selalu kosong.
   static final ArStoryConfig _videoOnly = ArStoryConfig(
     markerImagePath: _marker,
     // voiceoverUrl & bgmUrl tidak diisi -> cerita tetap jalan (hening).
-    videoPath: 'assets/videos/pg1.mp4',
-    videoWidthFraction: 0.82,
+    modelPath: _plane,
+    modelVideoPath: 'assets/videos/pg1.mp4',
+    modelVideoRotation: 180,
     videoMuted: true,
     videoLoop: true,
     subtitles: const <SubtitleCue>[],
   );
 
-  /// Cerita 3: plane 3D mentah (tanpa video) + VO & BGM.
+  /// Cerita 3: video 3D + VO (tanpa BGM) — plane yang sama bertekstur video.
+  /// Sebelumnya config ini hanya menampilkan `meshplane.glb` mentah tanpa
+  /// video sehingga terlihat seperti "model tidak muncul" (plane-nya
+  /// transparan). Kini diisi `modelVideoPath` agar selalu ada visual.
   static final ArStoryConfig _modelStory = ArStoryConfig(
+    markerImagePath: _marker,
+    voiceoverUrl: 'assets/audio/vo/page1-english.wav',
+    modelPath: _plane,
+    modelVideoPath: 'assets/videos/pg1.mp4',
+    modelVideoRotation: 180,
+    videoMuted: true,
+    videoLoop: true,
+    subtitles: _page1Cues,
+  );
+
+  /// Cerita 5: video POP-UP tegak (billboard) — konten sama dengan cerita 1
+  /// (VO + BGM + subtitle Dendaka), tapi quad digambar vertikal menghadap
+  /// kamera dengan kaki di tengah marker, bukan rebah di kertas.
+  /// Untuk demo perbandingan: buka tombol 1 vs tombol ini bergantian.
+  static final ArStoryConfig _uprightStory = ArStoryConfig(
     markerImagePath: _marker,
     voiceoverUrl: 'assets/audio/vo/page1-english.wav',
     bgmUrl: 'assets/audio/bgm/bgm1.mp3',
     modelPath: _plane,
-    modelScale: 0.64, // plane 1.414 unit x0.33 android = 0.467 -> x0.64 = 0.299m ≈ lebar marker
-    modelLift: 0.02,
-    subtitles: const <SubtitleCue>[
-      SubtitleCue(
-        start: 0.0,
-        end: 4.5,
-        id: 'Selamat datang di Candi Borobudur.',
-        en: 'Welcome to Borobudur Temple.',
-      ),
-    ],
+    modelVideoPath: 'assets/videos/pg1.mp4',
+    modelVideoRotation: 180,
+    modelVideoUpright: true,
+    videoMuted: true,
+    videoLoop: true,
+    subtitles: _page1Cues,
   );
 
   /// Cerita 4: mode WebAR (MindAR di WebView) - BERDAMPINGAN dengan mode
@@ -121,16 +161,23 @@ class StoryListPage extends StatelessWidget {
           const SizedBox(height: 12),
           _StoryCard(
             title: 'Video Saja (Tanpa Audio)',
-            subtitle: 'Test murni video/marker, VO & BGM kosong',
+            subtitle: 'Plane + video 3D nempel marker, hening tanpa VO/BGM',
             icon: Icons.videocam_rounded,
             onTap: () => _openStory(context, _videoOnly),
           ),
           const SizedBox(height: 12),
           _StoryCard(
-            title: 'Model 3D',
-            subtitle: 'Marker + plane meshplane.glb mentah + VO & BGM',
+            title: 'Video + VO (Tanpa BGM)',
+            subtitle: 'Plane + video 3D + subtitle Dendaka Forest',
             icon: Icons.temple_buddhist,
             onTap: () => _openStory(context, _modelStory),
+          ),
+          const SizedBox(height: 12),
+          _StoryCard(
+            title: 'Video Pop-Up (Tegak)',
+            subtitle: 'Video berdiri billboard, kaki di tengah marker',
+            icon: Icons.slideshow_rounded,
+            onTap: () => _openStory(context, _uprightStory),
           ),
           const SizedBox(height: 12),
           _StoryCard(

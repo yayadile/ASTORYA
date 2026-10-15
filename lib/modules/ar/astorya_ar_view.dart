@@ -96,8 +96,13 @@ class _AstoryaArViewState extends State<AstoryaArView> {
     final objects = _objectManager;
     if (objects == null || !widget.config.hasModelVideo) return;
     final c = _controller;
+    final wantPlaying = c.markerDetected && c.isPlaying;
+    debugPrint(
+      '[ASTORYA] markerVideo wantPlaying=$wantPlaying '
+      '(marker=${c.markerDetected} state=${c.state.name})',
+    );
     unawaited(
-      objects.setMarkerVideoPlaying(c.markerDetected && c.isPlaying),
+      objects.setMarkerVideoPlaying(wantPlaying),
     );
     // Saat cerita diulang (replay), kembalikan video ke detik 0.
     if (c.state == ArStoryState.ready) {
@@ -222,17 +227,42 @@ class _AstoryaArViewState extends State<AstoryaArView> {
         : _isFilePath(raw)
             ? 'file'
             : 'asset';
-    await objects.setupMarkerVideo(
-      ArStoryConfig.normalizeAssetKey(raw),
-      kind: kind,
-      loop: config.videoLoop,
-      muted: config.videoMuted,
-      autoplay: _controller.markerDetected && _controller.isPlaying,
-      rotation: config.modelVideoRotation,
-    );
+    final key = ArStoryConfig.normalizeAssetKey(raw);
+    debugPrint('[ASTORYA] setupMarkerVideo: kind=$kind path=$key '
+        'upright=${config.modelVideoUpright} rotation=${config.modelVideoRotation}');
+    try {
+      final ok = await objects.setupMarkerVideo(
+        key,
+        kind: kind,
+        loop: config.videoLoop,
+        muted: config.videoMuted,
+        autoplay: _controller.markerDetected && _controller.isPlaying,
+        rotation: config.modelVideoRotation,
+        upright: config.modelVideoUpright,
+      );
+      debugPrint('[ASTORYA] setupMarkerVideo result: $ok');
+    } catch (e) {
+      debugPrint('[ASTORYA] setupMarkerVideo GAGAL: $e');
+      _setArError('Video AR gagal disiapkan: $e');
+    }
     if (_disposed) return;
     // Samakan dengan state terkini (mis. marker terdeteksi lebih dulu).
     _onControllerChanged();
+    // Diagnostik otomatis: tanyakan status native 2x agar hasilnya
+    // kelihatan di console Flutter tanpa perlu adb logcat.
+    for (final delay in const [Duration(seconds: 4), Duration(seconds: 10)]) {
+      Future.delayed(delay, () async {
+        if (_disposed || !mounted) return;
+        if (!widget.config.hasModelVideo) return;
+        final objects = _objectManager;
+        if (objects == null) return;
+        final status = await objects.isMarkerVideoReady();
+        if (_disposed || !mounted) return;
+        debugPrint(
+          '[ASTORYA] markerVideoReady (+${delay.inSeconds}s): $status',
+        );
+      });
+    }
   }
 
   static bool _isFilePath(String path) {

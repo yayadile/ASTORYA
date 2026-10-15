@@ -82,25 +82,26 @@ internal class VideoPlaneRenderer {
 
     /// Gambar frame video terbaru pada quad [cornersNorm] (8 double ternor-
     /// malisasi [0,1], urutan TL, TR, BR, BL). Wajib di GL thread.
+    /// Mengembalikan `true` bila quad benar-benar di-submit ke GL.
     /// Tidak menggambar apa pun bila frame belum ada / surface dilepas.
     ///
     /// [rotationDegrees] memutar konten video searah jarum jam (0/90/180/
     /// 270) untuk menyamakan orientasi cetak marker: sudut layar `i`
     /// menampilkan konten sudut `(i - rot)`.
-    fun draw(cornersNorm: DoubleArray, rotationDegrees: Int = 0) {
-        if (cornersNorm.size != 8) return
-        val st = surfaceTexture ?: return
-        if (program == 0 || oesTexId == 0) return
+    fun draw(cornersNorm: DoubleArray, rotationDegrees: Int = 0): Boolean {
+        if (cornersNorm.size != 8) return false
+        val st = surfaceTexture ?: return false
+        if (program == 0 || oesTexId == 0) return false
         try {
             st.updateTexImage()
         } catch (_: Exception) {
-            return // surface ditinggalkan MediaPlayer
+            return false // surface ditinggalkan MediaPlayer
         }
         val tm = FloatArray(16)
         try {
             st.getTransformMatrix(tm)
         } catch (_: Exception) {
-            return
+            return false
         }
 
         val rot = ((rotationDegrees / 90) % 4 + 4) % 4
@@ -141,6 +142,7 @@ internal class VideoPlaneRenderer {
         GLES20.glDisableVertexAttribArray(aPos)
         GLES20.glDisableVertexAttribArray(aTex)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+        return true
     }
 
     /// Bebaskan tekstur/program. SurfaceTexture dilepas di sini; aman

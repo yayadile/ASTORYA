@@ -18,6 +18,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
+import kotlin.math.sqrt
 import android.view.PixelCopy
 import android.view.View
 import android.widget.Toast
@@ -156,6 +157,9 @@ internal class AndroidARView(
     // yang mematikan player (inilah "gagal diputar (what=-38)").
     private var markerVideoStarted = false
     private var markerVideoRotation = 0
+    // Mode "pop-up": quad digambar TEGAK menghadap kamera (billboard) dengan
+    // kaki di tengah marker, bukan rebah di bidang kertas.
+    private var markerVideoUpright = false
     private var pendingMarkerVideo: PendingMarkerVideo? = null
 
     private val nonTrackingResetThreshold = 30
@@ -359,6 +363,8 @@ internal class AndroidARView(
                                     (call.argument<Number>("rotation")?.toInt())
                                         ?: 0
                                 markerVideoRotation = rotation
+                                markerVideoUpright =
+                                    call.argument<Boolean>("upright") ?: false
                                 setupMarkerVideo(
                                     videoPath, kind, loop, muted, autoplay)
                                 result.success(true)
@@ -369,6 +375,24 @@ internal class AndroidARView(
                                 call.argument<Boolean>("playing") ?: false
                             setMarkerVideoPlaying(playing)
                             result.success(null)
+                        }
+                        "isMarkerVideoReady" -> {
+                            // Diagnostik untuk Dart: apakah player siap,
+                            // sedang main, atau nyangkut di pending/surface.
+                            result.success(mapOf(
+                                "prepared" to markerVideoPrepared,
+                                "started" to markerVideoStarted,
+                                "hasPlayer" to (markerVideoPlayer != null),
+                                "hasPending" to (pendingMarkerVideo != null),
+                                "rendererReady" to markerVideoRenderer.isReady(),
+                                "wantedPlaying" to markerVideoWantedPlaying,
+                                "upright" to markerVideoUpright,
+                                "drawCalls" to dbgDrawCalls,
+                                "drewFrames" to dbgDrewFrames,
+                                "drawSkipped" to dbgDrawSkipped,
+                                "lastCorners" to (lastDbgCorners?.toList()
+                                    ?: emptyList<Double>())
+                            ))
                         }
                         "seekMarkerVideo" -> {
                             val ms =
@@ -1392,7 +1416,12 @@ internal class AndroidARView(
         
         val now = SystemClock.uptimeMillis()
         for (augmentedImage in updatedAugmentedImages) {
-            Log.i(TAG, "AugmentedImage detected: name=${augmentedImage.name}, state=${augmentedImage.trackingState}, method=${augmentedImage.trackingMethod}")
+            // Throttle: log per-frame menenggelamkan diagnostik video di
+            // logcat (buffer kecil). Cukup 3x pertama + tiap perubahan state.
+            if (dbgTrackLogs < 3) {
+                dbgTrackLogs++
+                Log.i(TAG, "AugmentedImage detected: name=${augmentedImage.name}, state=${augmentedImage.trackingState}, method=${augmentedImage.trackingMethod}")
+            }
             when (augmentedImage.trackingState) {
                 TrackingState.TRACKING -> {
                     // Hanya FULL_TRACKING yang dipercaya. Terbukti via log:
@@ -1523,17 +1552,127 @@ internal class AndroidARView(
         val halfW = image.extentX / 2.0f
         val halfH = image.extentZ / 2.0f
 
-        // 4 corners on the marker surface plane (Y = 0):
-        // 0: top-left     (-halfW, 0f, -halfH)
-        // 1: top-right    ( halfW, 0f, -halfH)
-        // 2: bottom-right ( halfW, 0f,  halfH)
-        // 3: bottom-left  (-halfW, 0f,  halfH)
-        val localCorners = floatArrayOf(
-            -halfW, 0f, -halfH,
-            halfW, 0f, -halfH,
-            halfW, 0f, halfH,
-            -halfW, 0f, halfH,
-        )
+        // 4 titik DUNIA quad — dua mode:
+        // - rebah (default): 4 sudut fisik marker (Y lokal = 0).
+        // - tegak (billboard): quad vertikal menghadap kamera, kaki di
+        //   tengah marker. Lebar = lebar fisik marker, tinggi mengikuti
+        //   aspek video agar tidak gepeng.
+        val worldCorners = FloatArray(12)
+
+        // Rotasi vektor lokal -> dunia memakai quaternion pose (pengganti
+        // Pose.transformPoint offset yang rusak di build ini).
+        val pt = pose.translation
+        val pq = pose.rotationQuaternion
+        val qx = pq[0]
+        val qy = pq[1]
+        val qz = pq[2]
+        val qw = pq[3]
+        fun rotVec(lx: Float, ly: Float, lz: Float, out: FloatArray) {
+            val tx = 2f * (qy * lz - qz * ly)
+            val ty = 2f * (qz * lx - qx * lz)
+            val tz = 2f * (qx * ly - qy * lx)
+            out[0] = lx + qw * tx + (qy * tz - qz * ty)
+            out[1] = ly + qw * ty + (qz * tx - qx * tz)
+            out[2] = lz + qw * tz + (qx * ty - qy * tx)
+        }
+
+        if (!markerVideoUpright) {
+            // 0: top-left     (-halfW, 0f, -halfH)
+            // 1: top-right    ( halfW, 0f, -halfH)
+            // 2: bottom-right ( halfW, 0f,  halfH)
+            // 3: bottom-left  (-halfW, 0f,  halfH)
+            val tmp = FloatArray(3)
+            rotVec(-halfW, 0f, -halfH, tmp)
+            worldCorners[0] = pt[0] + tmp[0]
+            worldCorners[1] = pt[1] + tmp[1]
+            worldCorners[2] = pt[2] + tmp[2]
+            rotVec(halfW, 0f, -halfH, tmp)
+            worldCorners[3] = pt[0] + tmp[0]
+            worldCorners[4] = pt[1] + tmp[1]
+            worldCorners[5] = pt[2] + tmp[2]
+            rotVec(halfW, 0f, halfH, tmp)
+            worldCorners[6] = pt[0] + tmp[0]
+            worldCorners[7] = pt[1] + tmp[1]
+            worldCorners[8] = pt[2] + tmp[2]
+            rotVec(-halfW, 0f, halfH, tmp)
+            worldCorners[9] = pt[0] + tmp[0]
+            worldCorners[10] = pt[1] + tmp[1]
+            worldCorners[11] = pt[2] + tmp[2]
+        } else {
+            val vw = markerVideoPlayer?.videoWidth ?: 0
+            val vh = markerVideoPlayer?.videoHeight ?: 0
+            val aspect = if (vw > 0 && vh > 0) vw.toFloat() / vh else 16f / 9f
+            val wHalf = image.extentX / 2f
+            val hHalf = image.extentX / aspect / 2f
+            // Sumbu X marker + normal marker di ruang dunia.
+            val xAxis = FloatArray(3)
+            val normal = FloatArray(3)
+            rotVec(1f, 0f, 0f, xAxis)
+            rotVec(0f, 1f, 0f, normal)
+            // Tengah quad: tengah marker + normal * (setengah tinggi + 1 cm)
+            // sehingga tepi bawahnya menapak di atas kertas.
+            val cx = pt[0] + normal[0] * (hHalf + 0.01f)
+            val cy = pt[1] + normal[1] * (hHalf + 0.01f)
+            val cz = pt[2] + normal[2] * (hHalf + 0.01f)
+            // Normal quad menghadap kamera.
+            val camPos = camera.pose.translation
+            var nx = camPos[0] - cx
+            var ny = camPos[1] - cy
+            var nz = camPos[2] - cz
+            var nl = sqrt(nx * nx + ny * ny + nz * nz)
+            if (nl < 1e-6f) {
+                nx = normal[0]
+                ny = normal[1]
+                nz = normal[2]
+                nl = sqrt(nx * nx + ny * ny + nz * nz)
+                if (nl < 1e-6f) {
+                    nx = 0f
+                    ny = 0f
+                    nz = 1f
+                    nl = 1f
+                }
+            }
+            nx /= nl
+            ny /= nl
+            nz /= nl
+            // right = normalize(cross(up0, n)); fallback sumbu X marker
+            // bila kamera tepat di atas (degenerat).
+            var rx = nz
+            var ry = 0f
+            var rz = -nx
+            var rl = sqrt(rx * rx + rz * rz)
+            if (rl < 1e-6f) {
+                rx = xAxis[0]
+                ry = xAxis[1]
+                rz = xAxis[2]
+                rl = sqrt(rx * rx + ry * ry + rz * rz)
+                if (rl < 1e-6f) {
+                    rx = 1f
+                    ry = 0f
+                    rz = 0f
+                    rl = 1f
+                }
+            }
+            rx /= rl
+            ry /= rl
+            rz /= rl
+            // up = cross(n, r) — tegak lurus kamera & right.
+            val ux = ny * rz - nz * ry
+            val uy = nz * rx - nx * rz
+            val uz = nx * ry - ny * rx
+            worldCorners[0] = cx - rx * wHalf + ux * hHalf
+            worldCorners[1] = cy - ry * wHalf + uy * hHalf
+            worldCorners[2] = cz - rz * wHalf + uz * hHalf
+            worldCorners[3] = cx + rx * wHalf + ux * hHalf
+            worldCorners[4] = cy + ry * wHalf + uy * hHalf
+            worldCorners[5] = cz + rz * wHalf + uz * hHalf
+            worldCorners[6] = cx + rx * wHalf - ux * hHalf
+            worldCorners[7] = cy + ry * wHalf - uy * hHalf
+            worldCorners[8] = cz + rz * wHalf - uz * hHalf
+            worldCorners[9] = cx - rx * wHalf - ux * hHalf
+            worldCorners[10] = cy - ry * wHalf - uy * hHalf
+            worldCorners[11] = cz - rz * wHalf - uz * hHalf
+        }
 
         val viewMatrix = FloatArray(16)
         val projectionMatrix = FloatArray(16)
@@ -1541,17 +1680,14 @@ internal class AndroidARView(
         camera.getProjectionMatrix(projectionMatrix, 0, 0.1f, 100.0f)
 
         val result = DoubleArray(8)
-        val world = FloatArray(3)
         val worldVec = FloatArray(4)
         val viewVec = FloatArray(4)
         val clipVec = FloatArray(4)
 
         for (i in 0 until 4) {
-            // ARCore 1.52 overload transformPoint(out, outOffset, point, pointOffset)
-            pose.transformPoint(world, 0, localCorners, i * 3)
-            worldVec[0] = world[0]
-            worldVec[1] = world[1]
-            worldVec[2] = world[2]
+            worldVec[0] = worldCorners[i * 3]
+            worldVec[1] = worldCorners[i * 3 + 1]
+            worldVec[2] = worldCorners[i * 3 + 2]
             worldVec[3] = 1.0f
 
             android.opengl.Matrix.multiplyMV(viewVec, 0, viewMatrix, 0, worldVec, 0)
@@ -1655,6 +1791,9 @@ internal class AndroidARView(
             player.setSurface(surface)
             player.setOnPreparedListener { mp ->
                 markerVideoPrepared = true
+                Log.i(TAG, "MarkerVideo prepared " +
+                    "(${mp.videoWidth}x${mp.videoHeight}), " +
+                    "wantedPlaying=$markerVideoWantedPlaying")
                 try {
                     val w = mp.videoWidth
                     val h = mp.videoHeight
@@ -1685,6 +1824,8 @@ internal class AndroidARView(
                 true
             }
             markerVideoPlayer = player
+            Log.i(TAG, "setupMarkerVideo: preparing kind=$kind " +
+                "autoplay=$autoplay path=$videoPath")
             player.prepareAsync()
         } catch (e: Exception) {
             Log.e(TAG, "setupMarkerVideo: ${e.message}")
@@ -1757,9 +1898,25 @@ internal class AndroidARView(
     /// (GL thread) dari `onDrawFrame`. Batal bila belum prepared / marker
     /// tidak terlihat (video disembunyikan, benar secara AR).
     private var dbgCornerLogs = 0
+    private var dbgNotPreparedLogs = 0
+    private var dbgTrackLogs = 0
+    private var dbgDrawCalls = 0L
+    private var dbgDrewFrames = 0L
+    private var dbgDrawSkipped = 0L
+    private var lastDbgCorners: DoubleArray? = null
 
     private fun drawMarkerVideo() {
-        if (!markerVideoPrepared || markerVideoPlayer == null) return
+        dbgDrawCalls++
+        if (!markerVideoPrepared || markerVideoPlayer == null) {
+            if (dbgNotPreparedLogs < 3) {
+                dbgNotPreparedLogs++
+                Log.i(TAG, "DBG_VIDEO not prepared " +
+                    "(prepared=$markerVideoPrepared, " +
+                    "player=${markerVideoPlayer != null}, " +
+                    "pending=${pendingMarkerVideo != null})")
+            }
+            return
+        }
         val corners = computeMarkerScreenCorners()
         if (corners == null) {
             if (dbgCornerLogs < 3) {
@@ -1768,12 +1925,17 @@ internal class AndroidARView(
             }
             return
         }
+        lastDbgCorners = corners
         if (dbgCornerLogs < 3) {
             dbgCornerLogs++
             Log.i(TAG, "DBG_CORNERS " +
                 corners.joinToString(",") { "%.3f".format(it) })
         }
-        markerVideoRenderer.draw(corners, markerVideoRotation)
+        if (markerVideoRenderer.draw(corners, markerVideoRotation)) {
+            dbgDrewFrames++
+        } else {
+            dbgDrawSkipped++
+        }
     }
 
     private fun releaseMarkerVideoPlayer() {
