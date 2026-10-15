@@ -20,6 +20,7 @@ class AstoryaArHud extends StatefulWidget {
     required this.isReady,
     this.arError,
     this.onClose,
+    this.onFullscreen,
   });
 
   final AstoryaArController controller;
@@ -33,6 +34,9 @@ class AstoryaArHud extends StatefulWidget {
 
   /// Ditampilkan di tombol tutup control bar.
   final VoidCallback? onClose;
+
+  /// Ditampilkan di tombol fullscreen control bar (hanya bila ada video).
+  final VoidCallback? onFullscreen;
 
   @override
   State<AstoryaArHud> createState() => _AstoryaArHudState();
@@ -121,6 +125,7 @@ class _AstoryaArHudState extends State<AstoryaArHud> {
                           c.setLanguage(lang);
                         },
                         onClose: widget.onClose,
+                        onFullscreen: widget.onFullscreen,
                       ),
                       if (error != null) _ErrorBanner(message: error),
                     ],

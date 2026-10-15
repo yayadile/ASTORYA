@@ -10,6 +10,7 @@ export 'controllers/astorya_ar_controller.dart';
 export 'models/ar_story_config.dart';
 export 'models/subtitle_cue.dart';
 export 'widgets/ar_control_bar.dart';
+export 'widgets/ar_fullscreen_video.dart';
 export 'widgets/ar_marker_hint.dart';
 export 'widgets/ar_replay_overlay.dart';
 export 'widgets/ar_subtitle_overlay.dart';

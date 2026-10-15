@@ -14,6 +14,7 @@ import 'package:vector_math/vector_math_64.dart' as vm;
 
 import 'controllers/astorya_ar_controller.dart';
 import 'models/ar_story_config.dart';
+import 'widgets/ar_fullscreen_video.dart';
 import 'widgets/ar_video_overlay.dart';
 import 'widgets/astorya_ar_hud.dart';
 
@@ -375,6 +376,32 @@ class _AstoryaArViewState extends State<AstoryaArView> {
     setState(() => _arError = message);
   }
 
+  /// Buka video layar penuh: native menggambar quad menutupi layar dengan
+  /// player yang SAMA, jadi Voiceover/BGM terus berbunyi. Overlay Flutter
+  /// transparan hanya berisi tombol tutup.
+  void _openFullscreen() {
+    final objects = _objectManager;
+    if (_disposed || !mounted) return;
+    if (!widget.config.hasModelVideo || objects == null) return;
+    unawaited(objects.setMarkerVideoFullscreen(true));
+    Navigator.of(context)
+        .push<void>(
+          PageRouteBuilder<void>(
+            opaque: false,
+            barrierDismissible: false,
+            pageBuilder: (_, __, ___) => ArFullscreenVideo(
+              markerDetected: _controller.markerDetected,
+            ),
+          ),
+        )
+        .then((_) async {
+      // Kembalikan ke mode marker (abaikan bila view sudah dilepas).
+      try {
+        await objects.setMarkerVideoFullscreen(false);
+      } catch (_) {}
+    });
+  }
+
   // ================================================================ BUILD ===
 
   @override
@@ -409,6 +436,8 @@ class _AstoryaArViewState extends State<AstoryaArView> {
             isReady: _sessionInitialized && _trackingConfigured,
             arError: _arError,
             onClose: widget.onClose ?? () => Navigator.maybePop(context),
+            onFullscreen:
+                widget.config.hasModelVideo ? _openFullscreen : null,
           ),
         ],
       ),

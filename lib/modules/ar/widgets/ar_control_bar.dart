@@ -28,6 +28,7 @@ class ArControlBar extends StatelessWidget {
     required this.onBgmVolumeChanged,
     required this.onLanguageChanged,
     this.onClose,
+    this.onFullscreen,
   });
 
   final ArStoryState state;
@@ -45,6 +46,10 @@ class ArControlBar extends StatelessWidget {
   /// Tombol tutup. Bila `null`, tombol tidak ditampilkan
   /// (mis. saat modul di-embed, bukan di-push).
   final VoidCallback? onClose;
+
+  /// Tombol layar penuh video. Bila `null`, tombol tidak ditampilkan
+  /// (mis. config tanpa video model).
+  final VoidCallback? onFullscreen;
 
   bool get _isPlaying => state == ArStoryState.playing;
 
@@ -114,6 +119,17 @@ class ArControlBar extends StatelessWidget {
                   onLanguageChanged(lang);
                 },
               ),
+              if (onFullscreen != null) ...[
+                const SizedBox(width: 2),
+                _CircleIconButton(
+                  icon: Icons.fullscreen_rounded,
+                  tooltip: 'Video layar penuh',
+                  onTap: () {
+                    onActivePopupChanged(ArControlPopup.none);
+                    onFullscreen!();
+                  },
+                ),
+              ],
               if (onClose != null) ...[
                 const SizedBox(width: 2),
                 _CircleIconButton(

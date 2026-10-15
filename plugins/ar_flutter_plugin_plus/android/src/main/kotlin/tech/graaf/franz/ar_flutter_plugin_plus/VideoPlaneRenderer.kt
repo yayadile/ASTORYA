@@ -90,37 +90,89 @@ internal class VideoPlaneRenderer {
     /// menampilkan konten sudut `(i - rot)`.
     fun draw(cornersNorm: DoubleArray, rotationDegrees: Int = 0): Boolean {
         if (cornersNorm.size != 8) return false
-        val st = surfaceTexture ?: return false
         if (program == 0 || oesTexId == 0) return false
-        try {
-            st.updateTexImage()
-        } catch (_: Exception) {
-            return false // surface ditinggalkan MediaPlayer
-        }
-        val tm = FloatArray(16)
-        try {
-            st.getTransformMatrix(tm)
-        } catch (_: Exception) {
-            return false
-        }
+        val tm = latchFrame() ?: return false
+        val rot = normRot(rotationDegrees)
 
-        val rot = ((rotationDegrees / 90) % 4 + 4) % 4
         val pos = FloatArray(8)
-        val uv = FloatArray(8)
         for (i in 0 until 4) {
             val nx = cornersNorm[i * 2].toFloat()
             val ny = cornersNorm[i * 2 + 1].toFloat()
             pos[i * 2] = nx * 2f - 1f
             pos[i * 2 + 1] = 1f - ny * 2f
-            // UV video: TL=(0,0) TR=(1,0) BR=(1,1) BL=(0,1),
-            // ditransform matriks SurfaceTexture (rotasi frame kamera).
+        }
+        val uv = FloatArray(8)
+        fillUv(uv, rot, tm)
+        submit(pos, uv)
+        return true
+    }
+
+    /// Gambar video menutupi layar (mode fullscreen): persegi contain-fit
+    /// di tengah viewport NDC. Dipakai halaman fullscreen Flutter yang
+    /// transparan - player-nya TETAP milik native sehingga tidak ada
+    /// perebutan audio focus dengan Voiceover/BGM.
+    ///
+    /// [vpW]/[vpH]: ukuran viewport piksel. [aspect]: aspek video (w/h).
+    fun drawFullscreen(
+        vpW: Int,
+        vpH: Int,
+        aspect: Float,
+        rotationDegrees: Int = 0,
+    ): Boolean {
+        if (program == 0 || oesTexId == 0) return false
+        if (vpW <= 0 || vpH <= 0) return false
+        val safeAspect = if (aspect > 0f) aspect else 16f / 9f
+        val tm = latchFrame() ?: return false
+        val rot = normRot(rotationDegrees)
+
+        val viewAspect = vpW.toFloat() / vpH.toFloat()
+        val rw = 2f * minOf(1f, safeAspect / viewAspect)
+        val rh = 2f * minOf(1f, viewAspect / safeAspect)
+        val pos = floatArrayOf(
+            -rw / 2f, rh / 2f, // TL
+            rw / 2f, rh / 2f, // TR
+            rw / 2f, -rh / 2f, // BR
+            -rw / 2f, -rh / 2f, // BL
+        )
+        val uv = FloatArray(8)
+        fillUv(uv, rot, tm)
+        submit(pos, uv)
+        return true
+    }
+
+    private fun normRot(rotationDegrees: Int): Int =
+        ((rotationDegrees / 90) % 4 + 4) % 4
+
+    /// Ambil frame terbaru + matriks transform. Null bila gagal.
+    private fun latchFrame(): FloatArray? {
+        val st = surfaceTexture ?: return null
+        try {
+            st.updateTexImage()
+        } catch (_: Exception) {
+            return null // surface ditinggalkan MediaPlayer
+        }
+        val tm = FloatArray(16)
+        try {
+            st.getTransformMatrix(tm)
+        } catch (_: Exception) {
+            return null
+        }
+        return tm
+    }
+
+    /// Isi UV video: TL=(0,0) TR=(1,0) BR=(1,1) BL=(0,1), ditransform
+    /// matriks SurfaceTexture (rotasi frame kamera).
+    private fun fillUv(uv: FloatArray, rot: Int, tm: FloatArray) {
+        for (i in 0 until 4) {
             val ui = (i - rot + 4) % 4
             val u = if (ui == 0 || ui == 3) 0f else 1f
             val v = if (ui < 2) 0f else 1f
             uv[i * 2] = tm[0] * u + tm[4] * v + tm[12]
             uv[i * 2 + 1] = tm[1] * u + tm[5] * v + tm[13]
         }
+    }
 
+    private fun submit(pos: FloatArray, uv: FloatArray) {
         val posBuf = ByteBuffer.allocateDirect(32)
             .order(ByteOrder.nativeOrder()).asFloatBuffer()
         posBuf.put(pos).position(0)
@@ -142,7 +194,6 @@ internal class VideoPlaneRenderer {
         GLES20.glDisableVertexAttribArray(aPos)
         GLES20.glDisableVertexAttribArray(aTex)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
-        return true
     }
 
     /// Bebaskan tekstur/program. SurfaceTexture dilepas di sini; aman

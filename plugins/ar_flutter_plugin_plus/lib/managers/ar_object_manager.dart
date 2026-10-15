@@ -202,4 +202,17 @@ class ARObjectManager {
     return _channel.invokeMethod<void>(
         'seekMarkerVideo', {'positionMs': position.inMilliseconds});
   }
+
+  /// Tampilkan video marker native menutupi seluruh layar (mode fullscreen).
+  /// Player tetap sama (bukan player kedua) sehingga Voiceover/BGM tidak
+  /// kehilangan audio focus. Aman di semua platform: gagal diam-diam bila
+  /// channel tidak mendukung (mis. iOS).
+  Future<void> setMarkerVideoFullscreen(bool fullscreen) async {
+    try {
+      await _channel.invokeMethod<void>(
+          'setMarkerVideoFullscreen', {'fullscreen': fullscreen});
+    } catch (_) {
+      // Channel lama / platform lain: abaikan.
+    }
+  }
 }

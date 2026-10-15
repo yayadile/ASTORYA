@@ -160,6 +160,10 @@ internal class AndroidARView(
     // Mode "pop-up": quad digambar TEGAK menghadap kamera (billboard) dengan
     // kaki di tengah marker, bukan rebah di bidang kertas.
     private var markerVideoUpright = false
+    // Mode fullscreen: quad digambar menutupi layar (contain-fit), kamera
+    // tidak digambar (efek bioskop). Player tetap sama -> audio VO/BGM
+    // tidak terganggu (tanpa player kedua = tanpa rebutan audio focus).
+    private var markerVideoFullscreen = false
     private var pendingMarkerVideo: PendingMarkerVideo? = null
 
     private val nonTrackingResetThreshold = 30
@@ -376,6 +380,11 @@ internal class AndroidARView(
                             setMarkerVideoPlaying(playing)
                             result.success(null)
                         }
+                        "setMarkerVideoFullscreen" -> {
+                            markerVideoFullscreen =
+                                call.argument<Boolean>("fullscreen") ?: false
+                            result.success(null)
+                        }
                         "isMarkerVideoReady" -> {
                             // Diagnostik untuk Dart: apakah player siap,
                             // sedang main, atau nyangkut di pending/surface.
@@ -387,6 +396,7 @@ internal class AndroidARView(
                                 "rendererReady" to markerVideoRenderer.isReady(),
                                 "wantedPlaying" to markerVideoWantedPlaying,
                                 "upright" to markerVideoUpright,
+                                "fullscreen" to markerVideoFullscreen,
                                 "drawCalls" to dbgDrawCalls,
                                 "drewFrames" to dbgDrewFrames,
                                 "drawSkipped" to dbgDrawSkipped,
@@ -1917,6 +1927,34 @@ internal class AndroidARView(
             }
             return
         }
+        // Fullscreen: abaikan sudut marker (tetap tampil walau marker
+        // hilang), gambar contain-fit menutupi layar.
+        if (markerVideoFullscreen) {
+            val vw = if (cornersViewportWidth > 0) {
+                cornersViewportWidth
+            } else {
+                glSurfaceView.width
+            }
+            val vh = if (cornersViewportHeight > 0) {
+                cornersViewportHeight
+            } else {
+                glSurfaceView.height
+            }
+            val p = markerVideoPlayer
+            val aspect =
+                if (p != null && p.videoWidth > 0 && p.videoHeight > 0) {
+                    p.videoWidth.toFloat() / p.videoHeight
+                } else {
+                    16f / 9f
+                }
+            if (markerVideoRenderer.drawFullscreen(
+                    vw, vh, aspect, markerVideoRotation)) {
+                dbgDrewFrames++
+            } else {
+                dbgDrawSkipped++
+            }
+            return
+        }
         val corners = computeMarkerScreenCorners()
         if (corners == null) {
             if (dbgCornerLogs < 3) {
@@ -2238,7 +2276,14 @@ internal class AndroidARView(
                         )
                     }
                 }
-                backgroundRenderer.draw(frame)
+                // Fullscreen video: kamera tidak digambar (layar sudah hitam
+                // dari glClear di awal frame) agar efek bioskop penuh.
+                // Quad video tetap digambar di bawah oleh drawMarkerVideo.
+                // Bila player belum siap, kamera tetap tampil seperti biasa.
+                if (!markerVideoFullscreen || !markerVideoPrepared ||
+                    markerVideoPlayer == null) {
+                    backgroundRenderer.draw(frame)
+                }
 
                 val viewMatrix = FloatArray(16)
                 val projectionMatrix = FloatArray(16)
