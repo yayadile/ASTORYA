@@ -59,6 +59,7 @@ flutter:
     - assets/srt/
     - asset/splash_screen/
     - asset/menu_utama/
+    - "asset/petunjuk&tentang/"
 
   fonts:
     - family: FrauncesSuperSoftWonky
