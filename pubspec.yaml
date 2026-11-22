@@ -59,3 +59,9 @@ flutter:
     - assets/srt/
     - asset/splash_screen/
     - asset/menu_utama/
+
+  fonts:
+    - family: FrauncesSuperSoftWonky
+      fonts:
+        - asset: asset/fonts/Fraunces-Soft-Black.ttf
+          weight: 900
