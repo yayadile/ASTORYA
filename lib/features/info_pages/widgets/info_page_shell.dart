@@ -28,6 +28,7 @@ class InfoPageShell extends StatelessWidget {
     required this.pageLabel,
     this.onBack,
     this.showVersionFooter = true,
+    this.brandOffsetY = 0,
     this.respectSafeArea = false,
     this.children = const <Widget>[],
   });
@@ -41,6 +42,10 @@ class InfoPageShell extends StatelessWidget {
 
   /// Whether the decorative version footer is shown (React default: true).
   final bool showVersionFooter;
+
+  /// Vertical offset applied to the emblem and wordmark without changing
+  /// their source-image crops. Tentang uses -24; Petunjuk keeps the default.
+  final double brandOffsetY;
 
   /// When true the canvas is fitted inside the system safe area instead of the
   /// full window. Default false = identical framing to the React prototype
@@ -82,6 +87,7 @@ class InfoPageShell extends StatelessWidget {
                   child: _InfoCanvas(
                     onBack: handleBack,
                     showVersionFooter: showVersionFooter,
+                    brandOffsetY: brandOffsetY,
                     children: children,
                   ),
                 ),
@@ -120,11 +126,13 @@ class _InfoCanvas extends StatelessWidget {
   const _InfoCanvas({
     required this.onBack,
     required this.showVersionFooter,
+    required this.brandOffsetY,
     required this.children,
   });
 
   final VoidCallback onBack;
   final bool showVersionFooter;
+  final double brandOffsetY;
   final List<Widget> children;
 
   @override
@@ -160,10 +168,18 @@ class _InfoCanvas extends StatelessWidget {
             container: true,
             label: 'ASTORYA',
             excludeSemantics: true,
-            child: const Stack(
+            child: Stack(
               children: <Widget>[
-                CroppedAsset(spec: InfoPagesConfig.emblem, decorative: true),
-                CroppedAsset(spec: InfoPagesConfig.wordmark, decorative: true),
+                CroppedAsset(
+                  spec: InfoPagesConfig.emblem,
+                  decorative: true,
+                  offsetY: brandOffsetY,
+                ),
+                CroppedAsset(
+                  spec: InfoPagesConfig.wordmark,
+                  decorative: true,
+                  offsetY: brandOffsetY,
+                ),
               ],
             ),
           ),

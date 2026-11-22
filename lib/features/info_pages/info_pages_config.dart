@@ -154,6 +154,63 @@ class InfoFooterConfig {
   final FontWeight fontWeight;
 }
 
+/// Layout and plaque options for one informational section on Tentang.
+@immutable
+class AboutInfoSectionConfig {
+  const AboutInfoSectionConfig({
+    required this.y,
+    required this.title,
+    required this.containerWidth,
+    required this.plaqueWidth,
+    required this.plaqueHeight,
+    required this.plaqueFontSize,
+    required this.containerRadius,
+    required this.contentPadding,
+    this.compactOrnaments = false,
+    this.extendedOrnaments = false,
+  });
+
+  final double y;
+  final String title;
+  final double containerWidth;
+  final double plaqueWidth;
+  final double plaqueHeight;
+  final double plaqueFontSize;
+  final double containerRadius;
+  final EdgeInsets contentPadding;
+  final bool compactOrnaments;
+  final bool extendedOrnaments;
+}
+
+@immutable
+class AboutPageTheme {
+  const AboutPageTheme({
+    required this.plaqueTop,
+    required this.plaqueMid,
+    required this.plaqueBottom,
+    required this.plaqueBorder,
+    required this.plaqueText,
+    required this.containerTop,
+    required this.containerBottom,
+    required this.containerBorder,
+    required this.ornamentGold,
+    required this.ornamentHighlight,
+    required this.textPrimary,
+  });
+
+  final Color plaqueTop;
+  final Color plaqueMid;
+  final Color plaqueBottom;
+  final Color plaqueBorder;
+  final Color plaqueText;
+  final Color containerTop;
+  final Color containerBottom;
+  final Color containerBorder;
+  final Color ornamentGold;
+  final Color ornamentHighlight;
+  final Color textPrimary;
+}
+
 /// Central source of truth for the Petunjuk and Tentang pages.
 abstract final class InfoPagesConfig {
   // ---------------------------------------------------------------- canvas
@@ -311,6 +368,10 @@ abstract final class InfoPagesConfig {
   static const String tentangPageLabel = 'Tentang ASTORYA';
   static const String tentangHeading = 'Tentang';
   static const String tentangSectionLabel = 'Informasi tentang ASTORYA';
+  static const double tentangBrandOffsetY = -24;
+  static const double tentangDividerY = 581;
+  static const double tentangDividerWidth = 298;
+  static const double tentangDividerHeight = 18;
 
   static const CroppedAssetSpec tentangTitle = CroppedAssetSpec(
     src: 'asset/petunjuk&tentang/menu_tentang.png',
@@ -318,7 +379,7 @@ abstract final class InfoPagesConfig {
     naturalWidth: 3506,
     naturalHeight: 4381,
     crop: InfoRect(20, 163, 3470, 458),
-    target: InfoRect(56, 246, 300, 39.6),
+    target: InfoRect(56, 222, 300, 39.6),
   );
 
   static const CroppedAssetSpec tentangCard = CroppedAssetSpec(
@@ -328,7 +389,7 @@ abstract final class InfoPagesConfig {
     naturalWidth: 3506,
     naturalHeight: 4381,
     crop: InfoRect(53, 129, 3411, 2636),
-    target: InfoRect(19.5, 306, 373, 288.2),
+    target: InfoRect(19.5, 282, 373, 288.2),
   );
 
   static const List<String> tentangSections = <String>[
@@ -338,4 +399,51 @@ abstract final class InfoPagesConfig {
         'Nusantara dengan cara yang menyenangkan.',
     'Fitur utama: pembelajaran interaktif, visual AR, dan narasi bilingual.',
   ];
+
+  static const AboutInfoSectionConfig tentangVersionSection =
+      AboutInfoSectionConfig(
+    y: 608,
+    title: 'Versi Aplikasi',
+    containerWidth: 152,
+    plaqueWidth: 118,
+    plaqueHeight: 22,
+    plaqueFontSize: 12.5,
+    containerRadius: 20,
+    contentPadding: EdgeInsets.fromLTRB(12, 14, 12, 6),
+    compactOrnaments: true,
+  );
+  static const String tentangVersionValue = 'v1.0.0';
+
+  static const AboutInfoSectionConfig tentangDeveloperSection =
+      AboutInfoSectionConfig(
+    y: 676,
+    title: 'Pengembang',
+    containerWidth: 350,
+    plaqueWidth: 146,
+    plaqueHeight: 25,
+    plaqueFontSize: 14.5,
+    containerRadius: 25,
+    contentPadding: EdgeInsets.fromLTRB(12, 19, 12, 10),
+    extendedOrnaments: true,
+  );
+
+  static const List<String> tentangDevelopers = <String>[
+    'Ummi Imaroh',
+    'Adinda Massa Merah Lawan Tirani',
+  ];
+  static const String tentangInstitution = 'Politeknik Negeri Semarang';
+
+  static const AboutPageTheme tentangTheme = AboutPageTheme(
+    plaqueTop: Color(0xFFCC8D27),
+    plaqueMid: Color(0xFFA56315),
+    plaqueBottom: Color(0xFF8F510E),
+    plaqueBorder: Color(0xFFF0BC52),
+    plaqueText: Color(0xFFFFF6E4),
+    containerTop: Color.fromRGBO(255, 247, 228, 0.95),
+    containerBottom: Color.fromRGBO(255, 238, 204, 0.94),
+    containerBorder: Color(0xFFEECA82),
+    ornamentGold: Color(0xFFE5A13B),
+    ornamentHighlight: Color(0xFFF3C15A),
+    textPrimary: Color(0xFF60300D),
+  );
 }

@@ -52,6 +52,7 @@ class CroppedAsset extends StatelessWidget {
     required this.spec,
     this.decorative = false,
     this.fallbackLabel,
+    this.offsetY = 0,
   });
 
   final CroppedAssetSpec spec;
@@ -62,6 +63,9 @@ class CroppedAsset extends StatelessWidget {
 
   /// Text shown if the asset fails to load. Defaults to the spec's label.
   final String? fallbackLabel;
+
+  /// Optional placement adjustment that leaves the source crop unchanged.
+  final double offsetY;
 
   /// Decode width in physical pixels. Rounded up to a multiple of 128 so that
   /// resizing a browser window does not re-decode the PNG on every frame.
@@ -80,7 +84,13 @@ class CroppedAsset extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InfoRect crop = spec.crop;
-    final InfoRect target = spec.target;
+    final InfoRect sourceTarget = spec.target;
+    final InfoRect target = InfoRect(
+      sourceTarget.x,
+      sourceTarget.y + offsetY,
+      sourceTarget.w,
+      sourceTarget.h,
+    );
 
     final double scaleX = target.w / crop.w;
     final double scaleY = target.h / crop.h;
