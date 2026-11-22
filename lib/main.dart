@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
 
-import 'features/story/story_list_page.dart';
+import 'features/home/home_screen.dart';
+import 'features/splash/splash_screen.dart';
+
+/// Set to true at build time to skip Splash and preview Home directly:
+///   flutter run -d chrome --dart-define=ASTORYA_PREVIEW_HOME=true
+const bool _previewHome = bool.fromEnvironment(
+  'ASTORYA_PREVIEW_HOME',
+  defaultValue: false,
+);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,7 +32,7 @@ class AstoryaApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF0B0E1A),
         useMaterial3: true,
       ),
-      home: const StoryListPage(),
+      home: _previewHome ? const HomeScreen() : const SplashScreen(),
     );
   }
 }

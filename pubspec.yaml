@@ -57,3 +57,5 @@ flutter:
     - assets/audio/vo/
     - assets/audio/bgm/
     - assets/srt/
+    - asset/splash_screen/
+    - asset/menu_utama/
