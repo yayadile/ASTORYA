@@ -2,130 +2,88 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../story/story_list_page.dart';
+import 'home_config.dart';
 import 'widgets/menu_button.dart';
 
-/// ASTORYA Main Menu — warm Javanese home screen.
+/// ASTORYA Main Menu (port of MainMenu.tsx + MobileCanvas.tsx).
 ///
-/// The background PNG already contains the emblem, wordmark, clouds, and
-/// candi landscape. Flutter overlays only the four interactive buttons.
+/// The visual canvas is the supplied 412 x 917 Flutter conversion. Optional
+/// callbacks allow callers to override navigation, while the no-argument
+/// constructor used by the splash screen keeps the existing routes active.
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({
+    super.key,
+    this.onStart,
+    this.onInstructions,
+    this.onAbout,
+    this.onExit,
+  });
 
-  // ── Palette (matches warm golden theme) ────────────────────────────────────
-  static const Color _brownText   = Color(0xFF5C2D00);
-  static const Color _goldBorder  = Color(0xFFB07F1E);
-  static const Color _fillTop     = Color(0xFFFBEDC0);
-  static const Color _fillBottom  = Color(0xFFEED48A);
-  static const Color _dialogBg    = Color(0xFFFDF7EA);
-  static const Color _subtleText  = Color(0xFF6B5A3E);
+  final VoidCallback? onStart;
+  final VoidCallback? onInstructions;
+  final VoidCallback? onAbout;
+  final VoidCallback? onExit;
+
+  VoidCallback _callbackFor(BuildContext context, MenuButtonId id) {
+    switch (id) {
+      case MenuButtonId.start:
+        return onStart ?? () => _goMulai(context);
+      case MenuButtonId.instructions:
+        return onInstructions ?? () => _goPlaceholder(context, 'Petunjuk');
+      case MenuButtonId.about:
+        return onAbout ?? () => _goPlaceholder(context, 'Tentang');
+      case MenuButtonId.exit:
+        return onExit ?? () => _confirmKeluar(context);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFDF7EA),
-      body: LayoutBuilder(
-        builder: (context, box) {
-          // Keep 412 × 917 portrait ratio; pillar-box on wide screens.
-          const double designW = 412;
-          const double designH = 917;
-          const double aspect  = designW / designH;
-
-          final double sw = box.maxWidth;
-          final double sh = box.maxHeight;
-
-          final double cw, ch;
-          if (sw / sh > aspect) {
-            ch = sh;
-            cw = ch * aspect;
-          } else {
-            cw = sw;
-            ch = cw / aspect;
-          }
-
-          return Container(
-            color: const Color(0xFFFDF7EA),
-            alignment: Alignment.center,
-            child: SizedBox(
-              width: cw,
-              height: ch,
+      backgroundColor: HomeConfig.pageBackdrop,
+      body: Center(
+        // Uniform scale: min(width / 412, height / 917), centered, no stretch.
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: kHomeDesignWidth,
+            height: kHomeDesignHeight,
+            child: ClipRect(
               child: Stack(
-                fit: StackFit.expand,
+                clipBehavior: Clip.hardEdge,
                 children: [
-                  // ── Full-screen background ────────────────────────────────
-                  // BoxFit.cover fills the portrait canvas without distortion.
-                  Image.asset(
-                    'asset/menu_utama/backgorund-menu-utama.png',
-                    fit: BoxFit.cover,
-                    alignment: Alignment.topCenter,
-                  ),
-
-                  // ── Menu buttons ─────────────────────────────────────────
-                  // The logo+emblem occupies roughly the top 42% of the BG.
-                  // Buttons are placed starting at ~43% and spaced downward.
-                  SafeArea(
-                    child: Align(
-                      // Positive Y → push below center → sits in open area.
-                      alignment: const Alignment(0, 0.18),
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(horizontal: cw * 0.12),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            MenuButton(
-                              label: 'Mulai',
-                              icon: Icons.play_circle_outline_rounded,
-                              fillTop: _fillTop,
-                              fillBottom: _fillBottom,
-                              borderColor: _goldBorder,
-                              textColor: _brownText,
-                              onTap: () => _goMulai(context),
-                            ),
-                            SizedBox(height: cw * 0.040),
-                            MenuButton(
-                              label: 'Petunjuk',
-                              icon: Icons.menu_book_rounded,
-                              fillTop: _fillTop,
-                              fillBottom: _fillBottom,
-                              borderColor: _goldBorder,
-                              textColor: _brownText,
-                              onTap: () => _goPetunjuk(context),
-                            ),
-                            SizedBox(height: cw * 0.040),
-                            MenuButton(
-                              label: 'Tentang',
-                              icon: Icons.info_outline_rounded,
-                              fillTop: _fillTop,
-                              fillBottom: _fillBottom,
-                              borderColor: _goldBorder,
-                              textColor: _brownText,
-                              onTap: () => _goTentang(context),
-                            ),
-                            SizedBox(height: cw * 0.040),
-                            MenuButton(
-                              label: 'Keluar',
-                              icon: Icons.exit_to_app_rounded,
-                              fillTop: _fillTop,
-                              fillBottom: _fillBottom,
-                              borderColor: _goldBorder,
-                              textColor: _brownText,
-                              onTap: () => _confirmKeluar(context),
-                            ),
-                          ],
-                        ),
+                  Positioned.fill(
+                    child: ExcludeSemantics(
+                      child: Image.asset(
+                        HomeConfig.backgroundAsset,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                        gaplessPlayback: true,
                       ),
                     ),
                   ),
+                  for (final button in HomeConfig.buttons)
+                    Positioned(
+                      left: button.x,
+                      top: button.y,
+                      width: button.width,
+                      height: button.height,
+                      child: MenuButton(
+                        config: button,
+                        onPressed: _callbackFor(context, button.id),
+                      ),
+                    ),
                 ],
               ),
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
 
-  // ── Navigation handlers ───────────────────────────────────────────────────
-
+  // Existing Mulai behavior is retained; scanner-route changes are outside
+  // this visual integration.
   void _goMulai(BuildContext context) {
     Navigator.push<void>(
       context,
@@ -133,17 +91,10 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  void _goPetunjuk(BuildContext context) {
+  void _goPlaceholder(BuildContext context, String title) {
     Navigator.push<void>(
       context,
-      MaterialPageRoute<void>(builder: (_) => const _PlaceholderPage(title: 'Petunjuk')),
-    );
-  }
-
-  void _goTentang(BuildContext context) {
-    Navigator.push<void>(
-      context,
-      MaterialPageRoute<void>(builder: (_) => const _PlaceholderPage(title: 'Tentang')),
+      MaterialPageRoute<void>(builder: (_) => _PlaceholderPage(title: title)),
     );
   }
 
@@ -151,33 +102,32 @@ class HomeScreen extends StatelessWidget {
     showDialog<void>(
       context: context,
       barrierColor: Colors.black54,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: _dialogBg,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFFFDF7EA),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: const BorderSide(color: _goldBorder, width: 1.5),
+          side: const BorderSide(color: Color(0xFFB07F1E), width: 1.5),
         ),
         title: const Text(
           'Keluar',
           style: TextStyle(
-            color: _brownText,
+            color: Color(0xFF5C2D00),
             fontWeight: FontWeight.w700,
             fontSize: 18,
           ),
         ),
         content: const Text(
           'Apakah Anda yakin ingin keluar?',
-          style: TextStyle(color: _subtleText, fontSize: 14),
+          style: TextStyle(color: Color(0xFF6B5A3E), fontSize: 14),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Batal',
-                style: TextStyle(color: _subtleText)),
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Batal', style: TextStyle(color: Color(0xFF6B5A3E))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: _goldBorder,
+              backgroundColor: const Color(0xFFB07F1E),
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -185,8 +135,8 @@ class HomeScreen extends StatelessWidget {
               elevation: 0,
             ),
             onPressed: () {
-              Navigator.of(ctx).pop();
-              // SystemNavigator.pop() exits on Android; is a no-op on web.
+              Navigator.of(dialogContext).pop();
+              // SystemNavigator.pop() exits on Android; it is a no-op on web.
               SystemNavigator.pop();
             },
             child: const Text('Ya'),
@@ -197,11 +147,9 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-/// Minimal placeholder used until Petunjuk and Tentang screens are built.
-// ─────────────────────────────────────────────────────────────────────────────
 class _PlaceholderPage extends StatelessWidget {
   const _PlaceholderPage({required this.title});
+
   final String title;
 
   @override

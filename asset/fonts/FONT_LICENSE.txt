@@ -1,0 +1,21 @@
+Font: Fraunces SuperSoft Wonky (static instance used by ASTORYA)
+
+Original font metadata (read from the supplied WOFF2 "name" table):
+  Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
+  License URL: https://scripts.sil.org/OFL   (SIL Open Font License, Version 1.1)
+
+Modification notice:
+  asset/fonts/Fraunces-Soft-Black.ttf was produced from
+  public/fonts/Fraunces-Soft-Black-latin.woff2 by decoding WOFF2 and fixing the
+  variable axes at wght=860 and opsz=36 with fontTools.varLib.instancer. SOFT=100
+  and WONK=1 were already baked into this "SuperSoft Wonky" build (the file only
+  had opsz and wght axes). Glyph outlines are otherwise unchanged. Only Latin
+  glyphs (the "latin" subset) are included. Internal family name was changed to
+  "Fraunces SuperSoft Wonky Static".
+
+IMPORTANT: the full text of the SIL OFL 1.1 is NOT reproduced here (I had no
+network access to fetch it). Before publishing the app, add the official license
+text from https://openfontlicense.org (or the upstream Fraunces repository's
+OFL.txt) next to this file. OFL 1.1 permits bundling, modification and
+redistribution with an app provided the copyright notice and license text are
+included and the font is not sold on its own.
