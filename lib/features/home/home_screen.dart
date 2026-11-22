@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../story/story_list_page.dart';
+import '../info_pages/info_page_route.dart';
+import '../petunjuk/petunjuk_page.dart';
+import '../tentang/tentang_page.dart';
 import 'home_config.dart';
 import 'widgets/menu_button.dart';
 
@@ -27,11 +30,11 @@ class HomeScreen extends StatelessWidget {
   VoidCallback _callbackFor(BuildContext context, MenuButtonId id) {
     switch (id) {
       case MenuButtonId.start:
-        return onStart ?? () => _goMulai(context);
+        return _startHandler(context);
       case MenuButtonId.instructions:
-        return onInstructions ?? () => _goPlaceholder(context, 'Petunjuk');
+        return onInstructions ?? () => _goPetunjuk(context);
       case MenuButtonId.about:
-        return onAbout ?? () => _goPlaceholder(context, 'Tentang');
+        return onAbout ?? () => _goTentang(context);
       case MenuButtonId.exit:
         return onExit ?? () => _confirmKeluar(context);
     }
@@ -82,8 +85,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
+  VoidCallback _startHandler(BuildContext context) =>
+      onStart ?? () => _goMulai(context);
+
   // Existing Mulai behavior is retained; scanner-route changes are outside
-  // this visual integration.
+  // this information-page integration.
   void _goMulai(BuildContext context) {
     Navigator.push<void>(
       context,
@@ -91,10 +97,32 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  void _goPlaceholder(BuildContext context, String title) {
+  void _goPetunjuk(BuildContext context) {
     Navigator.push<void>(
       context,
-      MaterialPageRoute<void>(builder: (_) => _PlaceholderPage(title: title)),
+      InfoPageRoute<void>(
+        builder: (_) => PetunjukPage(
+          onStart: _startHandler(context),
+          startButtonBuilder: (_, config, onPressed) => MenuButton(
+            config: MenuButtonConfig(
+              id: MenuButtonId.start,
+              label: config.label,
+              width: config.width,
+              height: config.height,
+              x: config.x,
+              y: config.y,
+            ),
+            onPressed: onPressed,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _goTentang(BuildContext context) {
+    Navigator.push<void>(
+      context,
+      InfoPageRoute<void>(builder: (_) => const TentangPage()),
     );
   }
 
@@ -142,41 +170,6 @@ class HomeScreen extends StatelessWidget {
             child: const Text('Ya'),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PlaceholderPage extends StatelessWidget {
-  const _PlaceholderPage({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFDF7EA),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFFDF7EA),
-        elevation: 0,
-        foregroundColor: const Color(0xFF5C2D00),
-        title: Text(
-          title,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF5C2D00),
-          ),
-        ),
-      ),
-      body: Center(
-        child: Text(
-          'Halaman $title',
-          style: const TextStyle(
-            fontSize: 20,
-            color: Color(0xFF5C2D00),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
       ),
     );
   }
