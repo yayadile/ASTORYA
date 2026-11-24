@@ -69,6 +69,9 @@ class StoryListPage extends StatelessWidget {
     subtitles: _page1Cues,
   );
 
+  /// Existing production AR configuration, reused by direct "Mulai" entry.
+  static ArStoryConfig get videoStory => _videoStory;
+
   // -------------------------------------------------------------- handlers --
 
   void _openStory(BuildContext context, ArStoryConfig config) {

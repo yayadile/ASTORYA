@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../modules/ar/astorya_ar.dart';
 import '../story/story_list_page.dart';
 import '../info_pages/info_page_route.dart';
 import '../petunjuk/petunjuk_page.dart';
@@ -88,12 +89,13 @@ class HomeScreen extends StatelessWidget {
   VoidCallback _startHandler(BuildContext context) =>
       onStart ?? () => _goMulai(context);
 
-  // Existing Mulai behavior is retained; scanner-route changes are outside
-  // this information-page integration.
+  // Reuse StoryListPage's configured story while skipping its debug selection UI.
   void _goMulai(BuildContext context) {
     Navigator.push<void>(
       context,
-      MaterialPageRoute<void>(builder: (_) => const StoryListPage()),
+      MaterialPageRoute<void>(
+        builder: (_) => AstoryaArView(config: StoryListPage.videoStory),
+      ),
     );
   }
 
@@ -151,7 +153,8 @@ class HomeScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Batal', style: TextStyle(color: Color(0xFF6B5A3E))),
+            child:
+                const Text('Batal', style: TextStyle(color: Color(0xFF6B5A3E))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
